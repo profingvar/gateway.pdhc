@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Service Requests — PDHC Gateway{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Service Request Status</h1>
+  <p class="lead">Tracks delivery completion and grant expiry for inbound requests.</p>
+</div>
+
+<div class="card mb-2">
+  <form method="get" action="{{ url_for('web.requests_list') }}" class="inline-form">
+    <div class="form-group">
+      <label for="status">Filter by status</label>
+      <select id="status" name="status" class="form-control">
+        <option value="">All</option>
+        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+        <option value="completed" {% if status_filter == 'completed' %}selected{% endif %}>Completed</option>
+        <option value="partial" {% if status_filter == 'partial' %}selected{% endif %}>Partial</option>
+        <option value="expired" {% if status_filter == 'expired' %}selected{% endif %}>Expired</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+    {% if status_filter %}
+      <a href="{{ url_for('web.requests_list') }}" class="btn btn-secondary btn-sm">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+{% if requests %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Service Request</th>
+          <th>Patient</th>
+          <th>Provider</th>
+          <th>Status</th>
+          <th>Delivered</th>
+          <th>Observations</th>
+          <th>Grant Expires</th>
+          <th>First Received</th>
+          <th>Last Received</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sr in requests %}
+        <tr>
+          <td class="monospace">{{ sr.service_request_guid[:12] }}…</td>
+          <td class="monospace">{{ sr.patient_guid[:12] }}…</td>
+          <td class="monospace">{{ sr.provider_org_guid[:12] }}…</td>
+          <td>
+            {% if sr.status == 'completed' %}
+              <span class="badge badge-success">Completed</span>
+            {% elif sr.status == 'active' %}
+              <span class="badge badge-info">Active</span>
+            {% elif sr.status == 'partial' %}
+              <span class="badge badge-warning">Partial</span>
+            {% elif sr.status == 'expired' %}
+              <span class="badge badge-danger">Expired</span>
+            {% endif %}
+          </td>
+          <td class="monospace">{{ sr.delivery_progress }}</td>
+          <td class="monospace">{{ sr.total_observations }}</td>
+          <td class="monospace">
+            {% if sr.grant_expires_at %}
+              {{ sr.grant_expires_at|local('%Y-%m-%d %H:%M') }}
+              {% if sr.is_expired and sr.status == 'active' %}
+                <span class="badge badge-danger">Overdue</span>
+              {% endif %}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td class="monospace">{{ sr.first_received_at|local('%Y-%m-%d %H:%M') if sr.first_received_at else '—' }}</td>
+          <td class="monospace">{{ sr.last_received_at|local('%Y-%m-%d %H:%M') if sr.last_received_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <ul class="pagination">
+    {% if pagination.has_prev %}
+      <li><a href="{{ url_for('web.requests_list', page=pagination.prev_num, status=status_filter) }}">Prev</a></li>
+    {% endif %}
+    {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+      {% if p %}
+        {% if p == pagination.page %}
+          <li><span class="active">{{ p }}</span></li>
+        {% else %}
+          <li><a href="{{ url_for('web.requests_list', page=p, status=status_filter) }}">{{ p }}</a></li>
+        {% endif %}
+      {% else %}
+        <li><span>…</span></li>
+      {% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+      <li><a href="{{ url_for('web.requests_list', page=pagination.next_num, status=status_filter) }}">Next</a></li>
+    {% endif %}
+  </ul>
+  {% endif %}
+</div>
+
+<div class="card mt-2">
+  <h3>Status Legend</h3>
+  <table>
+    <tbody>
+      <tr><td><span class="badge badge-info">Active</span></td><td>Observations being received, grant not expired</td></tr>
+      <tr><td><span class="badge badge-success">Completed</span></td><td>All expected transactions delivered</td></tr>
+      <tr><td><span class="badge badge-warning">Partial</span></td><td>Some observations received but grant expired</td></tr>
+      <tr><td><span class="badge badge-danger">Expired</span></td><td>Grant expired, no observations received</td></tr>
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <p>No service requests tracked{% if status_filter %} with status <code>{{ status_filter }}</code>{% endif %}.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

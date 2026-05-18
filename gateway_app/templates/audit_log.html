@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — PDHC Gateway{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Audit Log</h1>
+  <p class="lead">GDPR-compliant event trail for all gateway activity.</p>
+</div>
+
+<div class="card mb-2">
+  <form method="get" action="{{ url_for('web.audit_log') }}" class="inline-form" style="flex-wrap:wrap;gap:0.75rem;">
+    <div class="form-group">
+      <label for="event_type">Event type</label>
+      <select id="event_type" name="event_type" class="form-control">
+        <option value="">All events</option>
+        {% for evt in known_events %}
+          <option value="{{ evt }}" {% if event_filter == evt %}selected{% endif %}>{{ evt }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="actor_guid">Actor GUID</label>
+      <input type="text" id="actor_guid" name="actor_guid" value="{{ actor_filter }}"
+             placeholder="Provider org GUID" class="form-control" style="width:18rem;">
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:0.4rem;">
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+      {% if event_filter or actor_filter %}
+        <a href="{{ url_for('web.audit_log') }}" class="btn btn-secondary btn-sm">Clear</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{% if entries %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Time (UTC)</th>
+          <th>Event</th>
+          <th>Actor (Provider Org)</th>
+          <th>Patient</th>
+          <th>Service Request</th>
+          <th>IP Address</th>
+          <th>Correlation ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        <tr>
+          <td class="monospace" style="white-space:nowrap;">
+            {{ e.created_at|local('%Y-%m-%d %H:%M:%S') if e.created_at else '—' }}
+          </td>
+          <td>
+            {% if 'validated' in e.event_type or 'received' in e.event_type or 'pushed' == e.event_type or 'acknowledged' in e.event_type %}
+              <span class="badge badge-success">{{ e.event_type }}</span>
+            {% elif 'rejected' in e.event_type or 'failed' in e.event_type %}
+              <span class="badge badge-rejected">{{ e.event_type }}</span>
+            {% elif 'accessed' in e.event_type or 'downloaded' in e.event_type %}
+              <span class="badge badge-endorsed">{{ e.event_type }}</span>
+            {% else %}
+              <span class="badge badge-pending">{{ e.event_type }}</span>
+            {% endif %}
+          </td>
+          <td class="monospace">
+            {% if e.actor_guid %}{{ e.actor_guid[:12] }}…{% else %}—{% endif %}
+          </td>
+          <td class="monospace">
+            {% if e.data_subject_guid %}{{ e.data_subject_guid[:12] }}…{% else %}—{% endif %}
+          </td>
+          <td class="monospace">
+            {% set sr = (e.payload_snapshot.service_request_guid if e.payload_snapshot else None) or e.receipt_token %}
+            {% if sr %}{{ sr[:12] }}…{% else %}—{% endif %}
+          </td>
+          <td class="monospace">{{ e.ip_address or '—' }}</td>
+          <td class="monospace">
+            {% if e.correlation_id %}{{ e.correlation_id[:12] }}…{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <ul class="pagination">
+    {% if pagination.has_prev %}
+      <li><a href="{{ url_for('web.audit_log', page=pagination.prev_num, event_type=event_filter, actor_guid=actor_filter) }}">Prev</a></li>
+    {% endif %}
+    {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+      {% if p %}
+        {% if p == pagination.page %}
+          <li><span class="active">{{ p }}</span></li>
+        {% else %}
+          <li><a href="{{ url_for('web.audit_log', page=p, event_type=event_filter, actor_guid=actor_filter) }}">{{ p }}</a></li>
+        {% endif %}
+      {% else %}
+        <li><span>…</span></li>
+      {% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+      <li><a href="{{ url_for('web.audit_log', page=pagination.next_num, event_type=event_filter, actor_guid=actor_filter) }}">Next</a></li>
+    {% endif %}
+  </ul>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <p>No audit events found{% if event_filter %} for type <code>{{ event_filter }}</code>{% endif %}{% if actor_filter %} and actor <code>{{ actor_filter }}</code>{% endif %}.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

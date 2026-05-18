@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Grant Status — PDHC Gateway{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Grant Status</h1>
+  <p class="lead">DataExchangeGrant validity for inbound service requests.</p>
+</div>
+
+<div class="dash-grid mb-2">
+  <a href="{{ url_for('web.grant_status', view='active') }}" class="card"
+     style="text-align:center;text-decoration:none;{% if view_filter == 'active' %}border-color:var(--primary);{% endif %}">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--primary);">{{ total_active }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Active grants</div>
+  </a>
+  <a href="{{ url_for('web.grant_status', view='expiring') }}" class="card"
+     style="text-align:center;text-decoration:none;{% if view_filter == 'expiring' %}border-color:var(--warning);{% endif %}">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--warning);">{{ total_expiring }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Expiring within 24 h</div>
+  </a>
+  <a href="{{ url_for('web.grant_status', view='expired') }}" class="card"
+     style="text-align:center;text-decoration:none;{% if view_filter == 'expired' %}border-color:var(--danger);{% endif %}">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--danger);">{{ total_expired }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Expired / partial</div>
+  </a>
+</div>
+
+<div class="card mb-2" style="display:flex;gap:0.4rem;align-items:center;padding:0.5rem 1rem;">
+  <a href="{{ url_for('web.grant_status', view='active') }}"
+     class="btn btn-sm {% if view_filter == 'active' %}btn-primary{% else %}btn-secondary{% endif %}">Active</a>
+  <a href="{{ url_for('web.grant_status', view='expiring') }}"
+     class="btn btn-sm {% if view_filter == 'expiring' %}btn-primary{% else %}btn-secondary{% endif %}">Expiring soon</a>
+  <a href="{{ url_for('web.grant_status', view='expired') }}"
+     class="btn btn-sm {% if view_filter == 'expired' %}btn-primary{% else %}btn-secondary{% endif %}">Expired</a>
+  <a href="{{ url_for('web.grant_status', view='all') }}"
+     class="btn btn-sm {% if view_filter == 'all' %}btn-primary{% else %}btn-secondary{% endif %}">All</a>
+</div>
+
+{% if grants %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Service Request</th>
+          <th>Patient</th>
+          <th>Provider</th>
+          <th>Contract</th>
+          <th>Grant Validity</th>
+          <th>Grant Expires</th>
+          <th>Delivery</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in grants %}
+        {% set expires = g.grant_expires_at %}
+        <tr>
+          <td class="monospace">{{ g.service_request_guid[:12] }}…</td>
+          <td class="monospace">{{ g.patient_guid[:12] }}…</td>
+          <td class="monospace">{{ g.provider_org_guid[:12] }}…</td>
+          <td class="monospace">{{ g.contract_guid[:12] }}…</td>
+          <td>
+            {% if not expires %}
+              <span class="badge badge-pending">No expiry set</span>
+            {% elif expires <= now %}
+              <span class="badge badge-rejected">Expired</span>
+            {% elif expires <= soon %}
+              <span class="badge badge-pending">Expiring soon</span>
+            {% else %}
+              <span class="badge badge-success">Valid</span>
+            {% endif %}
+          </td>
+          <td class="monospace" style="white-space:nowrap;">
+            {% if expires %}
+              {{ expires|local('%Y-%m-%d %H:%M') }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td class="monospace">{{ g.delivery_progress }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pagination.pages > 1 %}
+  <ul class="pagination">
+    {% if pagination.has_prev %}
+      <li><a href="{{ url_for('web.grant_status', page=pagination.prev_num, view=view_filter) }}">Prev</a></li>
+    {% endif %}
+    {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+      {% if p %}
+        {% if p == pagination.page %}
+          <li><span class="active">{{ p }}</span></li>
+        {% else %}
+          <li><a href="{{ url_for('web.grant_status', page=p, view=view_filter) }}">{{ p }}</a></li>
+        {% endif %}
+      {% else %}
+        <li><span>…</span></li>
+      {% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+      <li><a href="{{ url_for('web.grant_status', page=pagination.next_num, view=view_filter) }}">Next</a></li>
+    {% endif %}
+  </ul>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <p>No grants found for view <code>{{ view_filter }}</code>.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

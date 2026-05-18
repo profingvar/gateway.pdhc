@@ -1,0 +1,141 @@
+1. [DONE] read the document data_package_reference.docx in provider.pdhc/docs and create an item list of needed reforms in gateway.pdhc. Give the result after each added ticket in this document. Note that contract.pdhc.se and request.pdhc are up and ready.
+
+--- Ticket 1 Results (derived from provider.pdhc/docs/data_package_reference.md, Section 10) ---
+
+Current state: Gateway already has PAT validation (via request.pdhc), HMAC grant validation (local),
+guid_resolution_cache, observation ingestion pipeline, and receipt push to provider.pdhc.
+
+What needs to change: delegate grant validation to request.pdhc (remove shared HMAC_SECRET),
+add contract scope validation via contract.pdhc, accept minimal payload (remove org_guid/contract_guid
+from required body fields — derive from PAT and grant).
+
+1.1 [DONE] Delegate grant validation to request.pdhc (remove local HMAC)
+   - Current: GrantValidationService validates HMAC locally using shared HMAC_SECRET
+   - Change: call request.pdhc POST /api/v1/internal/grant/validate with X-Service-Key
+   - Request: { sr_guid, org_guid, patient_guid, grant_token }
+   - Response: { valid, contract_guid, grant_type, uses_remaining }
+   - Remove HMAC_SECRET from gateway config (secret stays on request.pdhc only)
+   - Cache valid grant results in guid_resolution_cache (source_type='grant_validation', short TTL ~60s)
+   - Add REQUEST_INTERNAL_SERVICE_KEY to config for X-Service-Key header
+
+1.2 [DONE] Add contract scope validation via contract.pdhc
+   - New service: ContractScopeService
+   - Calls GET /internal/contract/<guid>/scope on contract.pdhc with X-Service-Key
+   - Response: { contract_guid, status, scope_defined, request_scope, return_scope }
+   - Cache in guid_resolution_cache (source_type='contract_scope', TTL 300s)
+   - Validation logic:
+     * If contract revoked/terminated/cancelled → reject all (403)
+     * If scope_defined=false → all concepts permitted (backward compatible)
+     * Each observation's concept_guid must appear in return_scope (obligatory or optional)
+     * If status=completed: all obligatory_return concepts must be present
+   - Add CONTRACT_SERVICE_URL and CONTRACT_INTERNAL_SERVICE_KEY to config
+
+1.3 [DONE] SR context lookup via request.pdhc internal API
+   - Current: GuidResolutionService fetches full SR via public API with X-Api-Key
+   - Change: call GET /api/v1/internal/service-request/<guid>/context with X-Service-Key
+   - Response: pre-extracted transactions[], goals[], patient_guid, contract_guid, etc.
+   - No FHIR parsing needed on gateway side — request.pdhc does the extraction
+   - Cache in guid_resolution_cache (source_type='sr_context', TTL 3600s — SR is immutable after finalization)
+   - Use transaction map to resolve concept_guid from transaction_guid
+
+1.4 [DONE] Accept minimal report payload
+   - Current required body: patient_guid, contract_guid, organisation_guid, grant_token + observations
+   - Change: derive organisation_guid from validated PAT (g.provider_org_guid)
+   - Change: derive contract_guid from grant validation response (or PAT)
+   - New minimal required: patient_guid, grant_token, status + observations (transaction_guid, value, recorded_at per obs)
+   - Backward compatible: if org_guid/contract_guid provided, cross-check against derived values
+   - Observation enrichment: resolve concept_guid, unit, range_min, range_max, requirement_type
+     from SR context transaction map using transaction_guid
+
+1.5 [DONE] New validation chain (replaces current)
+   - Step 1: Validate PAT (existing — via request.pdhc, cached)
+   - Step 2: Validate grant (NEW — via request.pdhc internal API)
+   - Step 3: Cross-check patient_guid against SR context
+   - Step 4: Load contract scope (NEW — via contract.pdhc internal API)
+   - Step 5: Validate each observation's concept against contract scope
+   - Step 6: Check obligatory concepts if status=completed
+   - Step 7: Enrich observations from SR context (concept_guid, unit, ranges)
+   - Step 8: Store + vectorize (existing)
+   - Step 9: Push receipt to provider.pdhc (existing)
+
+1.6 [DONE] Security hardening
+   - Remove HMAC_SECRET from config (no longer needed)
+   - Add REQUEST_INTERNAL_SERVICE_KEY for request.pdhc internal endpoints
+   - Add CONTRACT_INTERNAL_SERVICE_KEY for contract.pdhc internal endpoints
+   - Use hmac.compare_digest for any remaining local comparisons
+   - AUTH_DISABLED must default to false (verify)
+   - No exception details in error responses
+
+1.7 [DONE] Tests
+   - Grant delegation: mock request.pdhc internal API, test valid/invalid/expired
+   - Contract scope: mock contract.pdhc scope endpoint, test scope enforcement
+   - SR context: mock request.pdhc context endpoint, test transaction resolution
+   - Minimal payload: test with/without optional fields, backward compat
+   - New validation chain: end-to-end with mocked upstream services
+   - Obligatory concept enforcement on completed status
+   - Existing test suite must still pass
+
+--- Ticket 1 Implementation Results ---
+
+1.1 grant_validation.py — Fully rewritten. GrantValidationService.validate() now calls
+    POST {REQUEST_SERVICE_URL}/internal/grant/validate with X-Service-Key header.
+    No local HMAC computation. GrantValidationResult extended with contract_guid,
+    grant_type, uses_remaining from response. Signature simplified: 4 params
+    (sr_guid, patient_guid, org_guid, grant_token) — contract_guid derived from response.
+
+1.2 contract_scope.py — NEW service. ContractScopeService.fetch_scope(contract_guid)
+    calls GET {CONTRACT_SERVICE_URL}/internal/contract/<guid>/scope with X-Service-Key.
+    Caches in guid_resolution_cache (source_type='contract_scope').
+    validate_observations() enforces return_scope (obligatory/optional concepts).
+    Revoked/terminated/cancelled contracts → reject. No scope → all permitted.
+    Obligatory concepts enforced only on status=completed.
+
+1.3 sr_context.py — NEW service. SRContextService.fetch(sr_guid) calls
+    GET {REQUEST_SERVICE_URL}/internal/service-request/<guid>/context with X-Service-Key.
+    Returns pre-extracted transactions[], goals[], patient_guid, contract_guid.
+    transaction_map() for O(1) lookup by transaction_guid.
+    Cached in guid_resolution_cache (source_type='sr_context', TTL 3600s).
+
+1.4 report_ingestion.py — Rewritten with new validation chain:
+    - org_guid derived from PAT (g.provider_org_guid), never from body
+    - contract_guid derived from grant validation response
+    - Backward compat: if body contains org_guid/contract_guid, cross-checked
+    - Observations enriched from SR context before validation (concept_guid,
+      concept_name, unit, ranges resolved from transaction_guid)
+    - Minimal required body: patient_guid, grant_token, status, observations[]
+
+1.5 New 10-step validation chain:
+    1. PAT (existing decorator) → 2. Cross-check body org → 3. Grant via request.pdhc
+    → 4. Cross-check body contract → 5. SR context from request.pdhc → 6. Patient cross-check
+    → 7. Enrich observations → 8. Validate observations → 9. Contract scope check
+    → 10. Store + audit + receipt
+
+1.6 Security:
+    - HMAC_SECRET removed from config (was already done)
+    - REQUEST_INTERNAL_SERVICE_KEY and CONTRACT_INTERNAL_SERVICE_KEY added
+    - AUTH_DISABLED defaults to false (verified)
+    - No exception details in error responses (verified)
+    - Hardening tests updated: verify no local HMAC, delegation confirmed
+
+1.7 Tests: 228 passed, 5 skipped, 0 failed
+    New test files:
+    - test_grant_validation.py — 9 tests (delegation, missing fields, upstream errors)
+    - test_contract_scope.py — 12 tests (fetch, revoked, scope validation, obligatory)
+    - test_sr_context.py — 6 tests (fetch, map, not found, unreachable)
+    - test_report_submission.py — 26 tests (minimal payload, backward compat, org/contract/
+      patient cross-check, scope enforcement, enrichment, auth, edge cases)
+    Existing tests updated: test_all_endpoints.py, test_hardening.py, test_request_completion.py
+
+Files modified:
+  gateway_app/app/services/grant_validation.py (rewritten)
+  gateway_app/app/services/report_ingestion.py (rewritten)
+  gateway_app/app/services/contract_scope.py (NEW)
+  gateway_app/app/services/sr_context.py (NEW)
+  gateway_app/config.py (updated earlier)
+  gateway_app/tests/test_grant_validation.py (rewritten)
+  gateway_app/tests/test_report_submission.py (rewritten)
+  gateway_app/tests/test_contract_scope.py (NEW)
+  gateway_app/tests/test_sr_context.py (NEW)
+  gateway_app/tests/test_all_endpoints.py (updated)
+  gateway_app/tests/test_hardening.py (updated)
+  gateway_app/tests/test_request_completion.py (updated)

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Cache Management — PDHC Gateway{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Cache Management</h1>
+  <p class="lead">GUID resolution cache — inspect, flush stale entries, or clear all.</p>
+</div>
+
+<div class="dash-grid mb-2">
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--primary);">{{ total }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Total entries</div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--success);">{{ total - total_expired }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Fresh</div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--danger);">{{ total_expired }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Stale / expired</div>
+  </div>
+</div>
+
+{% if stats %}
+<div class="card mb-2">
+  <h2>Entries by type</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Source Type</th>
+          <th>Total</th>
+          <th>Fresh</th>
+          <th>Stale</th>
+          <th>Oldest Fetch</th>
+          <th>Newest Fetch</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in stats %}
+        <tr>
+          <td><code>{{ s.source_type }}</code></td>
+          <td>{{ s.total }}</td>
+          <td>
+            {% if s.fresh > 0 %}
+              <span class="badge badge-success">{{ s.fresh }}</span>
+            {% else %}
+              <span style="color:var(--text-muted);">0</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if s.expired > 0 %}
+              <span class="badge badge-danger">{{ s.expired }}</span>
+            {% else %}
+              <span style="color:var(--text-muted);">0</span>
+            {% endif %}
+          </td>
+          <td class="monospace" style="font-size:0.85em;">{{ s.oldest.strftime('%Y-%m-%d %H:%M') if s.oldest else '—' }}</td>
+          <td class="monospace" style="font-size:0.85em;">{{ s.newest.strftime('%Y-%m-%d %H:%M') if s.newest else '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('web.cache_flush') }}" style="display:inline;">
+              <input type="hidden" name="mode" value="stale">
+              <input type="hidden" name="source_type" value="{{ s.source_type }}">
+              <button type="submit" class="btn btn-sm btn-secondary"
+                      {% if s.expired == 0 %}disabled{% endif %}>Flush stale</button>
+            </form>
+            <form method="post" action="{{ url_for('web.cache_flush') }}" style="display:inline;margin-left:0.3rem;"
+                  onsubmit="return confirm('Flush ALL {{ s.total }} {{ s.source_type }} entries? Upstream services will be re-queried on next request.');">
+              <input type="hidden" name="mode" value="all">
+              <input type="hidden" name="source_type" value="{{ s.source_type }}">
+              <button type="submit" class="btn btn-sm btn-danger">Flush all</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="card mb-2">
+  <h2>Global actions</h2>
+  <div style="display:flex;gap:0.8rem;align-items:center;">
+    <form method="post" action="{{ url_for('web.cache_flush') }}">
+      <input type="hidden" name="mode" value="stale">
+      <button type="submit" class="btn btn-primary"
+              {% if total_expired == 0 %}disabled{% endif %}>Flush all stale entries ({{ total_expired }})</button>
+    </form>
+    <form method="post" action="{{ url_for('web.cache_flush') }}"
+          onsubmit="return confirm('Flush ALL {{ total }} cache entries? This will cause upstream re-fetches on next request for every cached item.');">
+      <input type="hidden" name="mode" value="all">
+      <button type="submit" class="btn btn-danger"
+              {% if total == 0 %}disabled{% endif %}>Flush entire cache ({{ total }})</button>
+    </form>
+  </div>
+</div>
+
+{% if recent %}
+<div class="card">
+  <h2>Recent entries (last 25)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Source Type</th>
+          <th>Source GUID</th>
+          <th>Fetched At</th>
+          <th>TTL (s)</th>
+          <th>Status</th>
+          <th>Fetched From</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in recent %}
+        <tr>
+          <td><code>{{ e.source_type }}</code></td>
+          <td class="monospace" style="font-size:0.85em;">{{ e.source_guid }}</td>
+          <td class="monospace" style="font-size:0.85em;">{{ e.fetched_at.strftime('%Y-%m-%d %H:%M:%S') if e.fetched_at else '—' }}</td>
+          <td>{{ e.ttl_seconds }}</td>
+          <td>
+            {% if e.is_expired() %}
+              <span class="badge badge-danger">Stale</span>
+            {% else %}
+              <span class="badge badge-success">Fresh</span>
+            {% endif %}
+          </td>
+          <td style="font-size:0.85em;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.fetched_from or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

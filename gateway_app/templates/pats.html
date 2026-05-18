@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}PAT Activity — PDHC Gateway{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>PAT Activity</h1>
+  <p class="lead">Provider Access Token validation and rejection events grouped by organisation.</p>
+</div>
+
+<div class="dash-grid mb-2">
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--success);">{{ providers|length }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Providers seen</div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--primary);">{{ total_validated }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Total validations</div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--danger);">{{ total_rejected }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Total rejections</div>
+  </div>
+</div>
+
+<div class="card mb-2">
+  <form method="get" action="{{ url_for('web.pat_activity') }}" class="inline-form">
+    <div class="form-group">
+      <label for="actor_guid">Filter by provider org GUID</label>
+      <input type="text" id="actor_guid" name="actor_guid" value="{{ actor_filter }}"
+             placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="form-control" style="width:22rem;">
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+    {% if actor_filter %}
+      <a href="{{ url_for('web.pat_activity') }}" class="btn btn-secondary btn-sm">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+{% if providers %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Provider Org GUID</th>
+          <th>Validated</th>
+          <th>Rejected</th>
+          <th>Rejection Rate</th>
+          <th>Last Seen</th>
+          <th>Last IP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in providers %}
+        {% set total = p.validated + p.rejected %}
+        {% set rate = ((p.rejected / total) * 100)|round(1) if total > 0 else 0 %}
+        <tr>
+          <td class="monospace">{{ p.actor_guid }}</td>
+          <td>
+            {% if p.validated > 0 %}
+              <span class="badge badge-success">{{ p.validated }}</span>
+            {% else %}
+              <span style="color:var(--text-muted);">0</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if p.rejected > 0 %}
+              <span class="badge badge-rejected">{{ p.rejected }}</span>
+            {% else %}
+              <span style="color:var(--text-muted);">0</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if rate >= 50 %}
+              <span class="badge badge-rejected">{{ rate }}%</span>
+            {% elif rate > 0 %}
+              <span class="badge badge-pending">{{ rate }}%</span>
+            {% else %}
+              <span style="color:var(--text-muted);">0%</span>
+            {% endif %}
+          </td>
+          <td class="monospace">{{ p.last_seen|local('%Y-%m-%d %H:%M') if p.last_seen else '—' }}</td>
+          <td class="monospace">{{ p.last_ip or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <p>No PAT events recorded{% if actor_filter %} for org <code>{{ actor_filter }}</code>{% endif %}.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

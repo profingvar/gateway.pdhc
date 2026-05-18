@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Health Report — PDHC Gateway{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Health Report</h1>
+  <p class="lead">Upstream service connectivity and recent error events (last 24 h).</p>
+</div>
+
+<div class="dash-grid mb-2">
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:{% if ok_count == total_probes %}var(--success){% elif ok_count > 0 %}var(--warning){% else %}var(--danger){% endif %};">
+      {{ ok_count }} / {{ total_probes }}
+    </div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Services reachable</div>
+  </div>
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:{% if error_events|length == 0 %}var(--success){% else %}var(--danger){% endif %};">
+      {{ error_events|length }}
+    </div>
+    <div style="color:var(--text-muted);font-size:0.92em;">Errors (24 h)</div>
+  </div>
+  {% for etype, count in error_summary.items() %}
+  <div class="card" style="text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--danger);">{{ count }}</div>
+    <div style="color:var(--text-muted);font-size:0.92em;">{{ etype }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card mb-2">
+  <h2>Service probes</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>URL</th>
+          <th>Status</th>
+          <th>Latency</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in probes %}
+        <tr>
+          <td><strong>{{ p.name }}</strong></td>
+          <td class="monospace" style="font-size:0.85em;max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ p.url }}</td>
+          <td>
+            {% if p.status == 'ok' %}
+              <span class="badge badge-success">OK</span>
+            {% elif p.status == 'degraded' %}
+              <span class="badge badge-warning">Degraded</span>
+            {% elif p.status == 'unreachable' %}
+              <span class="badge badge-danger">Unreachable</span>
+            {% elif p.status == 'timeout' %}
+              <span class="badge badge-danger">Timeout</span>
+            {% else %}
+              <span class="badge badge-danger">{{ p.status }}</span>
+            {% endif %}
+          </td>
+          <td class="monospace">{{ '%d ms' % p.latency_ms if p.latency_ms is not none else '—' }}</td>
+          <td style="font-size:0.85em;">
+            {% if p.error %}
+              <span style="color:var(--danger);">{{ p.error }}</span>
+            {% elif p.detail is defined and p.detail %}
+              {% if p.detail.database is defined %}
+                DB: <span class="badge {% if p.detail.database == 'connected' %}badge-success{% else %}badge-danger{% endif %}">{{ p.detail.database }}</span>
+              {% endif %}
+              {% if p.detail.status is defined %}
+                {{ p.detail.status }}
+              {% endif %}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:0.8rem;">
+    <a href="{{ url_for('web.health_report') }}" class="btn btn-sm btn-primary">Re-check now</a>
+  </div>
+</div>
+
+{% if error_events %}
+<div class="card">
+  <h2>Recent errors (last 24 h)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Event</th>
+          <th>Timestamp</th>
+          <th>Actor / Provider</th>
+          <th>Patient</th>
+          <th>SR / Receipt</th>
+          <th>IP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for evt in error_events %}
+        <tr>
+          <td>
+            {% if evt.event_type == 'pat.rejected' %}
+              <span class="badge badge-danger">PAT rejected</span>
+            {% elif evt.event_type == 'report.rejected' %}
+              <span class="badge badge-danger">Report rejected</span>
+            {% elif evt.event_type == 'bundle.push_failed' %}
+              <span class="badge badge-warning">Push failed</span>
+            {% else %}
+              <span class="badge">{{ evt.event_type }}</span>
+            {% endif %}
+          </td>
+          <td class="monospace" style="font-size:0.85em;">{{ evt.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td class="monospace" style="font-size:0.85em;">{{ evt.actor_guid[:12] + '...' if evt.actor_guid and evt.actor_guid|length > 12 else evt.actor_guid or '—' }}</td>
+          <td class="monospace" style="font-size:0.85em;">{{ evt.data_subject_guid[:12] + '...' if evt.data_subject_guid and evt.data_subject_guid|length > 12 else evt.data_subject_guid or '—' }}</td>
+          <td class="monospace" style="font-size:0.85em;">{{ evt.receipt_token[:12] + '...' if evt.receipt_token and evt.receipt_token|length > 12 else evt.receipt_token or '—' }}</td>
+          <td class="monospace" style="font-size:0.85em;">{{ evt.ip_address or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <p>No error events in the last 24 hours.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

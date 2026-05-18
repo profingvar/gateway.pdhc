@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Gateway Dashboard — PDHC{% endblock %}
+
+{% block content %}
+<h1>Gateway Dashboard</h1>
+<div class="card">
+  <h2>gateway.pdhc</h2>
+  <p>Observation ingestion gateway. Receives and validates data from provider organisations.</p>
+  <table>
+    <thead>
+      <tr><th>Component</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>API Endpoints</td><td><span class="badge badge-success">Phase 1 — complete</span></td></tr>
+      <tr><td>PAT Validation</td><td><span class="badge badge-success">Phase 2 — complete</span></td></tr>
+      <tr><td>Observation Reception</td><td><span class="badge badge-success">Phase 3 — complete</span></td></tr>
+      <tr><td>GUID Resolution + Vectors</td><td><span class="badge badge-success">Phase 4 — complete</span></td></tr>
+      <tr><td>Provider Feed (poll)</td><td><span class="badge badge-success">Phase 5 — complete</span></td></tr>
+      <tr><td>Push Delivery</td><td><span class="badge badge-success">Phase 6 — complete</span></td></tr>
+      <tr><td>Hardening + Audit</td><td><span class="badge badge-success">Phase 7 — complete</span></td></tr>
+      <tr><td>Full Test Suite</td><td><span class="badge badge-success">Phase 8 — 139 tests</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="dash-grid mt-2">
+  <a href="{{ url_for('web.observations_list') }}" class="dash-card">
+    <i data-lucide="inbox"></i>
+    <h2>Observations</h2>
+    <p>View inbound observations, filter by patient, check receipt and resolution status.</p>
+  </a>
+  <a href="{{ url_for('web.requests_list') }}" class="dash-card">
+    <i data-lucide="clipboard-check"></i>
+    <h2>Requests</h2>
+    <p>Track service request completion, delivery progress and grant expiry.</p>
+  </a>
+  <a href="{{ url_for('web.pat_activity') }}" class="dash-card">
+    <i data-lucide="key-round"></i>
+    <h2>PATs</h2>
+    <p>Provider Access Token validation activity per organisation.</p>
+  </a>
+  <a href="{{ url_for('web.audit_log') }}" class="dash-card">
+    <i data-lucide="scroll-text"></i>
+    <h2>Audit Log</h2>
+    <p>GDPR event trail — all gateway activity with actor and patient GUIDs.</p>
+  </a>
+  <a href="{{ url_for('web.grant_status') }}" class="dash-card">
+    <i data-lucide="shield-check"></i>
+    <h2>Grant Status</h2>
+    <p>DataExchangeGrant validity — active, expiring, and expired grants.</p>
+  </a>
+  <a href="{{ url_for('web.cache_management') }}" class="dash-card">
+    <i data-lucide="database"></i>
+    <h2>Cache</h2>
+    <p>GUID resolution cache — inspect entries, flush stale data.</p>
+  </a>
+  <a href="{{ url_for('web.health_report') }}" class="dash-card">
+    <i data-lucide="heart-pulse"></i>
+    <h2>Health Report</h2>
+    <p>Upstream service connectivity, latency probes, and recent errors.</p>
+  </a>
+</div>
+{% endblock %}

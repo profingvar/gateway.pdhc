@@ -1,0 +1,28 @@
+# Env / credentials (CLAUDE.md §14)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.log
+
+# Runtime
+gunicorn.pid
+*.pid
+
+# macOS
+.DS_Store
+.Rhistory
+
+# Local test artefacts
+*.sql.gz
+.pytest_cache/
+
+# Editor
+.vscode/
+.idea/

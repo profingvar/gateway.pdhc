@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Documentation — PDHC Gateway{% endblock %}
+
+{% block content %}
+<h1>Documentation</h1>
+<p class="lead">Downloadable manuals and technical documentation.</p>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr><th>Document</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for doc in docs %}
+      <tr>
+        <td>{{ doc.title }}</td>
+        <td><a href="{{ url_for('web.download_doc', filename=doc.filename) }}" class="btn btn-primary btn-sm">Download</a></td>
+      </tr>
+      {% endfor %}
+      {% if not docs %}
+      <tr><td colspan="2" class="text-muted">No documentation files found.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
