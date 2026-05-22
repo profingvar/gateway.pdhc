@@ -13,6 +13,20 @@ from ..extensions import db
 logger = logging.getLogger(__name__)
 
 
+def _err(code, message, status):
+    """Build a spec-conforming error response envelope.
+
+    Includes both `error` (per provider integration guide vers2 Phase G)
+    and `code` (existing internal contract), plus `service_request_guid`
+    when the route is scoped to one (Flask URL view_args).
+    """
+    body = {'error': code, 'code': code, 'message': message}
+    sr = (request.view_args or {}).get('service_request_guid')
+    if sr:
+        body['service_request_guid'] = sr
+    return jsonify(body), status
+
+
 def require_provider_token(scope=None):
     """Decorator: validate X-Provider-Token and set g.pat_result.
 
@@ -26,27 +40,18 @@ def require_provider_token(scope=None):
 
             if not raw_token:
                 _audit_rejected('missing_token')
-                return jsonify({
-                    'code': 'UNAUTHORIZED',
-                    'message': 'X-Provider-Token header required',
-                }), 401
+                return _err('UNAUTHORIZED', 'X-Provider-Token header required', 401)
 
             result = PATValidationService.validate(raw_token)
 
             if not result.valid:
                 _audit_rejected(result.error)
-                return jsonify({
-                    'code': 'UNAUTHORIZED',
-                    'message': f'Invalid provider token: {result.error}',
-                }), 401
+                return _err('UNAUTHORIZED', f'Invalid provider token: {result.error}', 401)
 
             # Check scope if required
             if scope and not result.has_scope(scope):
                 _audit_rejected(f'scope_mismatch: need {scope}, have {result.scopes}')
-                return jsonify({
-                    'code': 'FORBIDDEN',
-                    'message': f'Token lacks required scope: {scope}',
-                }), 403
+                return _err('FORBIDDEN', f'Token lacks required scope: {scope}', 403)
 
             # Set provider context on g
             g.pat_result = result
