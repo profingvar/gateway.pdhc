@@ -20,13 +20,20 @@ from ..errors import APIError
 def submit_report(service_request_guid):
     """Receive an observation report from a provider.
 
-    Validation chain:
-    1. PAT validated (by decorator)
-    2. PAT org matches body.organisation_guid
-    3. Composite key (4 GUIDs + grant_token) validates
-    4. Observations validated against FHIR R5
-    5. Stored + audited
+    Validation chain (Phase G of the provider integration guide):
+    1. PAT validated (by decorator) → 401 UNAUTHORIZED
+    2. PAT has 'write' scope (by decorator) → 403 FORBIDDEN
+    3. PAT org matches body.organisation_guid (cross-check) → 403
+    4. Grant token HMAC matches → 403 GRANT_TOKEN_INVALID
+    5. Grant token not expired → 403 GRANT_EXPIRED
+    6. body.patient_guid matches SR.patient_guid → 403 PATIENT_MISMATCH
+    7. Contract still active → 403 CONTRACT_INACTIVE
+    8. All concepts within contract.return_scope → 403 SCOPE_VIOLATION
+    9. On completed: every obligatory concept present → 422 VALIDATION_ERROR
+
+    Error envelope: {error, code, message, service_request_guid, [details]}.
     """
+    g.service_request_guid = service_request_guid
     body = request.get_json()
     if not body:
         raise APIError('JSON body required', code='BAD_REQUEST', status_code=400)
@@ -62,7 +69,28 @@ def provider_feed():
 def download_bundle(service_request_guid):
     """Download full FHIR Bundle + grant_token for a ServiceRequest.
 
-    Proxies from request.pdhc.
+    Proxies from request.pdhc. Audit-logged per the provider integration
+    guide (ticket #137).
     """
+    g.service_request_guid = service_request_guid
     data, status = FeedService.download_bundle(service_request_guid, g.raw_token)
+    if 200 <= status < 300:
+        try:
+            from ..models import AuditLog
+            from ..extensions import db
+            audit = AuditLog(
+                event_type='bundle.downloaded',
+                actor_guid=g.provider_org_guid,
+                receipt_token=service_request_guid,
+                ip_address=request.remote_addr,
+                correlation_id=request.headers.get('X-Correlation-Id'),
+                payload_snapshot={
+                    'service_request_guid': service_request_guid,
+                    'provider_org_guid': g.provider_org_guid,
+                },
+            )
+            db.session.add(audit)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return jsonify(data), status

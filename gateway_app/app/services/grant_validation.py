@@ -113,10 +113,14 @@ class GrantValidationService:
             )
 
         if not data.get('valid'):
+            # request.pdhc may include an explicit error_code (per provider
+            # integration guide Phase G #4-5: split GRANT_EXPIRED from
+            # GRANT_TOKEN_INVALID). Fall back to GRANT_TOKEN_INVALID if not.
+            upstream_code = data.get('error_code') or 'GRANT_TOKEN_INVALID'
             return GrantValidationResult(
                 valid=False,
                 error=data.get('error', 'Invalid grant token'),
-                error_code='GRANT_TOKEN_INVALID',
+                error_code=upstream_code,
             )
 
         return GrantValidationResult(
