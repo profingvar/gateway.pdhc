@@ -271,6 +271,7 @@ class ReportIngestionService:
         if scope_result.valid and scope_result.scope_defined and observations:
             scope_ok, scope_errors = ContractScopeService.validate_observations(
                 scope_result, observations, status,
+                service_request_guid=service_request_guid,
             )
             if not scope_ok:
                 _audit_rejection(service_request_guid, patient_guid,

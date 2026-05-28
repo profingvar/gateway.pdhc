@@ -153,3 +153,80 @@ class TestValidateObservations:
         obs = [{'concept_guid': 'any-concept', 'value': 42}]
         valid, errors = ContractScopeService.validate_observations(scope, obs)
         assert valid is True
+
+
+class TestObligatoryAcrossPriorSubmissions:
+    """Phase G #9: completing an SR satisfies obligatory if it appeared in
+    ANY prior submission's stored InboundObservations — not just the
+    current batch.
+    """
+
+    def _scope(self, obligatory):
+        return ContractScopeResult(
+            valid=True, scope_defined=True,
+            return_scope={'obligatory_return': list(obligatory),
+                          'optional_return': []},
+        )
+
+    def _store_prior(self, app, sr_guid, concept_guids):
+        from app.extensions import db
+        from app.models import InboundObservation
+        with app.app_context():
+            for c in concept_guids:
+                db.session.add(InboundObservation(
+                    service_request_guid=sr_guid,
+                    patient_guid='pt-1',
+                    provider_org_guid='org-1',
+                    contract_guid='contract-aaa',
+                    concept_guid=c,
+                    fhir_observation_json={'concept_guid': c},
+                    payload_hash='prior-' + c,
+                    validation_status='valid',
+                ))
+            db.session.commit()
+
+    def test_obligatory_satisfied_by_prior_submission(self, app):
+        sr = 'sr-prior-1'
+        self._store_prior(app, sr, ['c-1'])  # c-1 came in an earlier batch
+        scope = self._scope(['c-1', 'c-2'])
+        obs = [{'concept_guid': 'c-2', 'value': 7}]  # closing batch only has c-2
+        with app.app_context():
+            valid, errors = ContractScopeService.validate_observations(
+                scope, obs, status='completed', service_request_guid=sr,
+            )
+        assert valid is True, errors
+
+    def test_obligatory_still_missing_across_batches(self, app):
+        sr = 'sr-prior-2'
+        self._store_prior(app, sr, ['c-1'])
+        scope = self._scope(['c-1', 'c-2', 'c-3'])
+        obs = [{'concept_guid': 'c-2', 'value': 7}]
+        with app.app_context():
+            valid, errors = ContractScopeService.validate_observations(
+                scope, obs, status='completed', service_request_guid=sr,
+            )
+        assert valid is False
+        miss = next(e for e in errors if 'missing_concept_guids' in e)
+        assert miss['missing_concept_guids'] == ['c-3']
+
+    def test_prior_obs_only_count_for_same_sr(self, app):
+        # An obs stored for a DIFFERENT sr does not satisfy this SR's obligatory.
+        self._store_prior(app, 'sr-other', ['c-1'])
+        scope = self._scope(['c-1'])
+        obs = [{'concept_guid': 'c-99', 'value': 7}]  # c-99 not in scope; c-1 missing
+        with app.app_context():
+            valid, errors = ContractScopeService.validate_observations(
+                scope, obs, status='completed',
+                service_request_guid='sr-this-one',
+            )
+        assert valid is False
+
+    def test_no_sr_guid_falls_back_to_batch_only(self, app):
+        # Without sr_guid the prior-obs query is skipped — back-compat.
+        scope = self._scope(['c-1', 'c-2'])
+        obs = [{'concept_guid': 'c-1', 'value': 7}]
+        with app.app_context():
+            valid, errors = ContractScopeService.validate_observations(
+                scope, obs, status='completed',
+            )
+        assert valid is False  # c-2 missing, no SR to check prior obs against

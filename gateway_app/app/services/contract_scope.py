@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import requests as http_requests
 from flask import current_app
 
-from ..models import GuidResolutionCache
+from ..models import GuidResolutionCache, InboundObservation
 from ..extensions import db
 
 logger = logging.getLogger(__name__)
@@ -130,13 +130,18 @@ class ContractScopeService:
         }
 
     @staticmethod
-    def validate_observations(scope_result, observations, status='in-progress'):
+    def validate_observations(scope_result, observations, status='in-progress',
+                              service_request_guid=None):
         """Validate observation concepts against contract scope.
 
         Args:
             scope_result: ContractScopeResult from fetch_scope()
             observations: list of observation dicts (must have concept_guid)
             status: report status — 'completed' triggers obligatory check
+            service_request_guid: when status == 'completed', union with
+                concepts from prior submissions for this SR so an
+                obligatory satisfied in an earlier in-progress batch is
+                not re-required in the closing batch (Phase G #9).
 
         Returns:
             (valid, errors) tuple
@@ -163,12 +168,23 @@ class ContractScopeService:
                     'message': 'Concept not in contract return scope',
                 })
 
-        # On completed: all obligatory concepts must be present
+        # On completed: all obligatory concepts must be present across the
+        # CURRENT batch ∪ prior submissions on the same SR (Phase G #9).
         if status == 'completed' and scope_result.obligatory_guids:
             submitted_concepts = {
                 obs.get('concept_guid') for obs in observations
                 if obs.get('concept_guid')
             }
+            if service_request_guid:
+                prior = (
+                    InboundObservation.query
+                    .with_entities(InboundObservation.concept_guid)
+                    .filter(InboundObservation.service_request_guid == service_request_guid)
+                    .filter(InboundObservation.concept_guid.isnot(None))
+                    .distinct()
+                    .all()
+                )
+                submitted_concepts |= {row.concept_guid for row in prior}
             missing = scope_result.obligatory_guids - submitted_concepts
             if missing:
                 errors.append({
