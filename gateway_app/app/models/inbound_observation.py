@@ -26,6 +26,10 @@ class InboundObservation(db.Model):
     value = db.Column(db.Text, nullable=True)
     response_type = db.Column(db.String(50), nullable=True)
     payload_hash = db.Column(db.String(64), nullable=True)
+    # Per-observation idempotency key — sha256(patient|tx|recorded_at).
+    # Null when recorded_at is unknown; partial unique index on
+    # (service_request_guid, dedup_key) prevents re-POSTed duplicates.
+    dedup_key = db.Column(db.String(64), nullable=True, index=True)
 
     # Resolution status (for GUID chain → vector pipeline)
     resolution_status = db.Column(db.String(20), nullable=False, default='pending')
@@ -68,3 +72,16 @@ class InboundObservation(db.Model):
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
         ).hexdigest()
+
+    @staticmethod
+    def compute_dedup_key(patient_guid, transaction_guid, recorded_at):
+        """Return sha256 hex of patient|tx|recorded_at, or None if
+        recorded_at is missing (the field that disambiguates two readings
+        of the same parameter). NULL dedup_keys are not constrained by
+        the partial unique index → no per-obs dedup attempted.
+        """
+        if not recorded_at:
+            return None
+        parts = '|'.join([patient_guid or '', transaction_guid or '',
+                          recorded_at])
+        return hashlib.sha256(parts.encode()).hexdigest()

@@ -308,10 +308,46 @@ class ReportIngestionService:
                 'action': 'duplicate_ignored',
             }
 
-        # ── Step 9: Store observations ──────────────────────────────
+        # ── Step 9: Store observations (per-obs idempotency, #148) ──
+        # The batch fast-path above caught byte-identical re-POSTs. Here
+        # we dedup at the per-observation level by
+        # sha256(patient|tx|recorded_at). A batch with one new obs and
+        # several previously-seen ones now stores only the new one
+        # instead of duplicating the unchanged ones.
         stored = []
+        ignored = []
+        seen_in_batch = set()
         if observations:
-            for obs in observations:
+            for idx, obs in enumerate(observations):
+                dedup_key = InboundObservation.compute_dedup_key(
+                    patient_guid,
+                    obs.get('transaction_guid'),
+                    obs.get('recorded_at'),
+                )
+                if dedup_key:
+                    # Intra-batch dedup (first wins).
+                    if dedup_key in seen_in_batch:
+                        ignored.append({
+                            'observation_index': idx,
+                            'transaction_guid': obs.get('transaction_guid'),
+                            'reason': 'duplicate_in_batch',
+                        })
+                        continue
+                    seen_in_batch.add(dedup_key)
+                    # Cross-batch dedup — was this (patient,tx,recorded_at)
+                    # already stored on a prior submission of this SR?
+                    prior = InboundObservation.query.filter_by(
+                        service_request_guid=service_request_guid,
+                        dedup_key=dedup_key,
+                    ).first()
+                    if prior:
+                        ignored.append({
+                            'observation_index': idx,
+                            'transaction_guid': obs.get('transaction_guid'),
+                            'reason': 'duplicate_prior_submission',
+                            'receipt_guid': prior.guid,
+                        })
+                        continue
                 record = InboundObservation(
                     service_request_guid=service_request_guid,
                     transaction_guid=obs.get('transaction_guid'),
@@ -324,6 +360,7 @@ class ReportIngestionService:
                     value=str(obs.get('value', '')),
                     response_type=obs.get('response_type'),
                     payload_hash=payload_hash,
+                    dedup_key=dedup_key,
                     validation_status='valid',
                     resolution_status='resolved' if obs.get('concept_guid') else 'pending',
                     is_late=is_late,
@@ -360,6 +397,8 @@ class ReportIngestionService:
                 'patient_guid': patient_guid,
                 'contract_guid': contract_guid,
                 'observation_count': len(observations) if observations else 1,
+                'observations_stored': len(stored),
+                'observations_ignored': len(ignored),
                 'status': status,
                 'payload_hash': payload_hash,
                 'is_late': is_late,
@@ -382,14 +421,29 @@ class ReportIngestionService:
                          organisation_guid, contract_guid,
                          len(stored), expires_at, observations)
 
-        return {
+        # All-stored → action=created; all-ignored → duplicate_ignored
+        # (matches the batch-fast-path semantics); mixed → partial. The
+        # per-obs `ignored` list is always included when non-empty so
+        # providers can re-derive receipt-guids for prior submissions.
+        if stored and not ignored:
+            action = 'created'
+        elif ignored and not stored:
+            action = 'duplicate_ignored'
+        else:
+            action = 'partial'
+
+        resp = {
             'status': 'accepted',
-            'receipt_guid': stored[0].guid,
+            'receipt_guid': stored[0].guid if stored
+                            else (ignored[0].get('receipt_guid') if ignored else None),
             'service_request_guid': service_request_guid,
             'observations_stored': len(stored),
             'is_late': is_late,
-            'action': 'created',
+            'action': action,
         }
+        if ignored:
+            resp['observations_ignored'] = ignored
+        return resp
 
 
 def _store_questionnaire_response(sr_guid, patient_guid, org_guid,

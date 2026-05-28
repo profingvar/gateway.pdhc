@@ -251,6 +251,109 @@ class TestMinimalPayload:
         assert resp2.get_json()['action'] == 'duplicate_ignored'
 
 
+class TestPerObservationIdempotency:
+    """Ticket #148 — per-observation dedup at (patient, tx, recorded_at).
+    A batch that re-submits some obs and adds new ones should store only
+    the new ones and report the rest as duplicate_ignored.
+    """
+
+    def _body(self, obs_list):
+        return {
+            'patient_guid': 'patient-222',
+            'grant_token': 'valid-grant-token',
+            'status': 'in-progress',
+            'report_payload': {'observations': obs_list},
+        }
+
+    def _obs(self, tx, value, recorded_at, concept='concept-001'):
+        return {
+            'transaction_guid': tx,
+            'concept_guid': concept,
+            'value': value,
+            'response_type': 'numeric',
+            'recorded_at': recorded_at,
+        }
+
+    def test_repost_same_obs_then_add_new_one_stores_only_the_new(self, client, app, db):
+        patches = _patch_all_upstreams()
+        sr = 'sr-idem-per-obs-1'
+        first = self._body([self._obs('tx-A', 80, '2026-05-28T10:00:00Z')])
+        # second batch: same first obs (same patient/tx/recorded_at) PLUS a new one
+        second = self._body([
+            self._obs('tx-A', 80, '2026-05-28T10:00:00Z'),
+            self._obs('tx-A', 95, '2026-05-28T11:00:00Z'),  # new recorded_at
+        ])
+        with patches[0], patches[1], patches[2], patches[3]:
+            r1 = client.post(f'/api/v1/provider/report/{sr}', json=first,
+                             headers={'X-Provider-Token': 'valid-token'})
+            r2 = client.post(f'/api/v1/provider/report/{sr}', json=second,
+                             headers={'X-Provider-Token': 'valid-token'})
+        assert r1.status_code == 202
+        assert r1.get_json()['action'] == 'created'
+        assert r2.status_code == 202
+        d = r2.get_json()
+        # The first obs was duplicate; the second was new → partial.
+        assert d['action'] == 'partial'
+        assert d['observations_stored'] == 1
+        assert len(d['observations_ignored']) == 1
+        assert d['observations_ignored'][0]['reason'] == 'duplicate_prior_submission'
+
+    def test_full_dupe_at_obs_level_returns_duplicate_ignored(self, client, app, db):
+        # batch fast-path catches this too, but the per-obs path is the
+        # backstop if payload_hash differs by some non-meaningful field.
+        patches = _patch_all_upstreams()
+        sr = 'sr-idem-per-obs-2'
+        body = self._body([self._obs('tx-X', 7, '2026-05-28T12:00:00Z')])
+        with patches[0], patches[1], patches[2], patches[3]:
+            r1 = client.post(f'/api/v1/provider/report/{sr}', json=body,
+                             headers={'X-Provider-Token': 'valid-token'})
+            r2 = client.post(f'/api/v1/provider/report/{sr}', json=body,
+                             headers={'X-Provider-Token': 'valid-token'})
+        assert r2.get_json()['action'] == 'duplicate_ignored'
+
+    def test_intra_batch_duplicates_collapsed(self, client, app, db):
+        patches = _patch_all_upstreams()
+        sr = 'sr-idem-per-obs-3'
+        body = self._body([
+            self._obs('tx-Y', 1, '2026-05-28T13:00:00Z'),
+            self._obs('tx-Y', 1, '2026-05-28T13:00:00Z'),  # same key
+            self._obs('tx-Y', 2, '2026-05-28T14:00:00Z'),
+        ])
+        with patches[0], patches[1], patches[2], patches[3]:
+            r = client.post(f'/api/v1/provider/report/{sr}', json=body,
+                            headers={'X-Provider-Token': 'valid-token'})
+        d = r.get_json()
+        assert d['action'] == 'partial'
+        assert d['observations_stored'] == 2  # one dupe collapsed
+        assert any(i['reason'] == 'duplicate_in_batch'
+                   for i in d['observations_ignored'])
+
+    def test_recorded_at_missing_no_per_obs_dedup(self, client, app, db):
+        # Without recorded_at the dedup_key is NULL — fall back to
+        # legacy behaviour: both copies stored, batch fast-path can still
+        # catch a literal-identical re-POST.
+        patches = _patch_all_upstreams()
+        sr = 'sr-idem-per-obs-4'
+        body = self._body([
+            {'transaction_guid': 'tx-Z', 'concept_guid': 'concept-001',
+             'value': 50, 'response_type': 'numeric'},
+        ])
+        with patches[0], patches[1], patches[2], patches[3]:
+            r = client.post(f'/api/v1/provider/report/{sr}', json=body,
+                            headers={'X-Provider-Token': 'valid-token'})
+        assert r.get_json()['action'] == 'created'
+        # Re-post with a slightly different non-dedup field — fast-path
+        # wouldn't catch this, and we shouldn't dedup at obs level either
+        # (recorded_at missing → no dedup_key).
+        body['report_payload']['observations'][0]['notes'] = 'differ'
+        with patches[0], patches[1], patches[2], patches[3]:
+            r2 = client.post(f'/api/v1/provider/report/{sr}', json=body,
+                             headers={'X-Provider-Token': 'valid-token'})
+        d = r2.get_json()
+        assert d['action'] == 'created'
+        assert d['observations_stored'] == 1
+
+
 class TestOrgCrossCheck:
 
     def test_wrong_org_in_body(self, client, app, db):
