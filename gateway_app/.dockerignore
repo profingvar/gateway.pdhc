@@ -1,0 +1,17 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.bak*
+*.pid
+gunicorn.pid
+results/
+logs/
+*.log
+.git/
+.pytest_cache/
+.DS_Store
+*.bak
+*.bak.*
+tests/
