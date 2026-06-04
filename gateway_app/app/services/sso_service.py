@@ -1,6 +1,36 @@
 """SSO integration — token validation, role mapping, access helpers."""
 import requests
-from flask import current_app, session
+from flask import current_app, request, session
+
+
+def current_session_id():
+    """Return the SSO session_id ("sid" JWT claim, see ticket #191)
+    for the current request, or None if not available.
+
+    Resolution order (ticket #222):
+      1. ``X-Operator-Session-Id`` header — canonical carrier for
+         internal service-key callers (sim.pdhc / monitor.pdhc / etc.)
+         that don't go through the SSO blob.
+      2. ``session['access_blob']['session_id']`` — set by
+         ``get_access_blob`` on each fresh /me/service response.
+      3. None — legacy caller / AUTH_DISABLED dev blob without the
+         claim. Audit row gets NULL; downstream PDL kontroller queries
+         must treat NULL as "no session correlation available".
+    """
+    try:
+        header_val = request.headers.get('X-Operator-Session-Id')
+    except RuntimeError:
+        # No active request context (e.g. background CLI work).
+        header_val = None
+    if header_val:
+        # Cap length at the column's storage to avoid silent truncation.
+        return header_val[:128]
+    blob = session.get('access_blob') if session else None
+    if isinstance(blob, dict):
+        sid = blob.get('session_id')
+        if sid:
+            return str(sid)[:128]
+    return None
 
 
 def initiate_sso_login(next_url, state):

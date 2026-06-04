@@ -3,6 +3,18 @@ from datetime import datetime, timezone
 from ..extensions import db
 
 
+def _default_session_id():
+    """SQLAlchemy default factory — pull the SSO session_id from the
+    current request context if any. Returns None when no context (eg.
+    CLI / scripts / outside-of-request audit writes), so the column
+    stays NULL rather than blowing up. Ticket #222."""
+    try:
+        from ..services.sso_service import current_session_id
+        return current_session_id()
+    except Exception:
+        return None
+
+
 class AuditLog(db.Model):
     __tablename__ = 'audit_log'
 
@@ -23,6 +35,15 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(45), nullable=True)
     correlation_id = db.Column(db.String(36), nullable=True, index=True)
 
+    # Ticket #222: SSO session_id (sid claim in the JWT, see ticket #191
+    # and sso.pdhc integration-guide.md "Operator Session Correlation").
+    # Auto-filled via the SQLAlchemy default from the current request
+    # context (Flask session blob → X-Operator-Session-Id header). NULL
+    # for legacy callers / scripts. Indexed because the typical PDL
+    # kontroller query is "all rows for session S".
+    session_id = db.Column(db.String(128), nullable=True, index=True,
+                           default=_default_session_id)
+
     created_at = db.Column(db.DateTime(timezone=True),
                            default=lambda: datetime.now(timezone.utc))
 
@@ -35,5 +56,6 @@ class AuditLog(db.Model):
             'receipt_token': self.receipt_token,
             'ip_address': self.ip_address,
             'correlation_id': self.correlation_id,
+            'session_id': self.session_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
