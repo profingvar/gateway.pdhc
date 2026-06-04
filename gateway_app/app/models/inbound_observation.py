@@ -31,9 +31,9 @@ class InboundObservation(db.Model):
     # (service_request_guid, dedup_key) prevents re-POSTed duplicates.
     dedup_key = db.Column(db.String(64), nullable=True, index=True)
 
-    # Resolution status (for GUID chain → vector pipeline)
+    # Resolution status (GUID chain resolution outcome)
     resolution_status = db.Column(db.String(20), nullable=False, default='pending')
-    # pending → resolved → vectorized | failed
+    # pending → resolved | failed
 
     # Validation
     validation_status = db.Column(db.String(20), nullable=False, default='pending')

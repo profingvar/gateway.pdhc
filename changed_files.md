@@ -6,6 +6,21 @@ All edited files with full path, per Rule 17.
 
 | File | Change | Date |
 |------|--------|------|
+| `./gateway_app/app/api/vectors.py` (deleted) | Ticket #219 — full removal of the unauthenticated `/api/v1/vectors/*` blueprint (PDL Ch 4 §§ 1-2 exposure). Four routes that returned patient-identified data with no auth + no audit; zero production callers. | 2026-06-04 |
+| `./gateway_app/app/services/vector_service.py` (deleted) | Ticket #219 — VectorService engine; only called from the removed routes. | 2026-06-04 |
+| `./gateway_app/app/models/observation_vector.py` (deleted) | Ticket #219 — `ObservationVector` model; backing table dropped via the new migration below. | 2026-06-04 |
+| `./gateway_app/tests/test_guid_resolution.py` (deleted) | Ticket #219 — entire file exercised `VectorService`; ~17 tests for code that no longer exists. | 2026-06-04 |
+| `./gateway_app/migrations/versions/f3a4b5c6d7e8_drop_observation_vectors.py` (new) | Ticket #219 — Alembic migration dropping `observation_vectors` table + its 4 indices. Downgrade preserved for rollback. | 2026-06-04 |
+| `./gateway_app/app/api/__init__.py` | Ticket #219 — drop `from . import vectors`. | 2026-06-04 |
+| `./gateway_app/app/services/__init__.py` | Ticket #219 — drop `VectorService` import + export. | 2026-06-04 |
+| `./gateway_app/app/models/__init__.py` | Ticket #219 — drop `ObservationVector` import + export. | 2026-06-04 |
+| `./gateway_app/app/__init__.py` | Ticket #219 — drop the 4 `vectors-*` entries from the public API doc payload. | 2026-06-04 |
+| `./gateway_app/app/web/views.py` | Ticket #219 — drop `ObservationVector` lookup from `observation_detail`; template no longer needs the `vector` context var. | 2026-06-04 |
+| `./gateway_app/app/models/inbound_observation.py` | Ticket #219 — comment update: resolution_status states are now `pending → resolved \| failed` (no longer `vectorized`, which was only set by removed code). | 2026-06-04 |
+| `./gateway_app/templates/observation_detail.html` | Ticket #219 — remove the `{% if vector %}` "Resolved Context" card + the `Vectorized` status badge branch. | 2026-06-04 |
+| `./gateway_app/templates/observations_list.html` | Ticket #219 — remove the `Vectorized` status badge branch (status was never reachable). | 2026-06-04 |
+| `./gateway_app/tests/test_all_endpoints.py` | Ticket #219 — remove `TestVectorEndpoints` class (4 tests against removed routes). | 2026-06-04 |
+| `./gateway_app/tests/test_observations_page.py` | Ticket #219 — remove `ObservationVector` import + `test_detail_shows_vector_context` (couldn't run after model removal). | 2026-06-04 |
 | `./gateway_app/app/api/observations.py` | Route clinical Quantity unit refs through plan.pdhc per platform principle (only plan.pdhc emits external code-system refs). `valueQuantity` and `referenceRange.low/high` now use `system="https://plan.pdhc.se/api/v1/lookup/units"` (with the UCUM-compatible `unit_name` as `code`) instead of `http://unitsofmeasure.org`. Standard FHIR-meta refs unchanged (Observation category, security profiles). | 2026-05-18 |
 | `./gateway_app/app/services/sso_service.py` | Ticket #93: re-validate SSO token on every `get_access_blob()` call so 10-min idle timeout takes effect (ticket #50 pattern) | 2026-04-20 |
 | `./gateway_app/config.py` | Ticket #93: add `PERMANENT_SESSION_LIFETIME = 8h` (was relying on Flask 31-day default) | 2026-04-20 |

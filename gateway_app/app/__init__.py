@@ -208,26 +208,6 @@ def _register_metadata(app):
                         "definition": "GET /api/v1/observations?organization={org_guid}",
                         "documentation": "Search observations by requesting organisation. Requires SSO Bearer token with analysis phase access. Returns FHIR R5 searchset Bundle with full metadata (basedOn, performer, referenceRange, contract/plan extensions).",
                     },
-                    {
-                        "name": "vectors-by-patient",
-                        "definition": "GET /api/v1/vectors/by-patient/{patient_guid}",
-                        "documentation": "Query observation vectors by patient (experimental).",
-                    },
-                    {
-                        "name": "vectors-by-careplan",
-                        "definition": "GET /api/v1/vectors/by-careplan/{careplan_guid}",
-                        "documentation": "Query observation vectors by careplan (experimental).",
-                    },
-                    {
-                        "name": "vectors-similar",
-                        "definition": "POST /api/v1/vectors/similar",
-                        "documentation": "Find semantically similar observation vectors (experimental).",
-                    },
-                    {
-                        "name": "vectors-resolve",
-                        "definition": "POST /api/v1/vectors/resolve/{service_request_guid}",
-                        "documentation": "Trigger GUID chain resolution and vector construction for a ServiceRequest.",
-                    },
                 ],
                 "security": {
                     "service": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/restful-security-service", "code": "OAuth"}]}],

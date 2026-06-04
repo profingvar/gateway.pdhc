@@ -1,7 +1,7 @@
 """Tests for the observations list and detail pages (tilläggsuppdrag 2)."""
 import pytest
 from unittest.mock import patch
-from app.models import InboundObservation, AuditLog, ObservationVector
+from app.models import InboundObservation, AuditLog
 from flask import g
 
 
@@ -91,34 +91,6 @@ class TestObservationDetail:
     def test_detail_404(self, client, db):
         resp = client.get('/observations/nonexistent-guid')
         assert resp.status_code == 404
-
-    def test_detail_shows_vector_context(self, app, client, db):
-        """When a vector exists, the resolved context should be visible."""
-        with app.app_context():
-            obs = _create_observation(db)
-            vector = ObservationVector(
-                observation_guid=obs.guid,
-                careplan_guid='careplan-444',
-                plandef_guid='plandef-555',
-                transaction_guid='txn-001',
-                resolved_context_json={
-                    'concept_name': 'Heart rate',
-                    'activity_description': 'Resting HR measurement',
-                    'careplan_title': 'Cardio monitoring',
-                    'plandef_title': 'Cardio plan template',
-                },
-                embedding_json=[0.1] * 384,
-                vector_model='text-hash-v0',
-            )
-            db.session.add(vector)
-            db.session.commit()
-            guid = obs.guid
-
-        resp = client.get(f'/observations/{guid}')
-        assert resp.status_code == 200
-        assert b'Heart rate' in resp.data
-        assert b'Cardio monitoring' in resp.data
-        assert b'384 dims' in resp.data
 
     def test_detail_shows_audit_trail(self, app, client, db):
         with app.app_context():

@@ -60,10 +60,8 @@
             {% endif %}
           </td>
           <td>
-            {% if obs.resolution_status == 'vectorized' %}
-              <span class="badge badge-success">Vectorized</span>
-            {% elif obs.resolution_status == 'resolved' %}
-              <span class="badge badge-info">Resolved</span>
+            {% if obs.resolution_status == 'resolved' %}
+              <span class="badge badge-success">Resolved</span>
             {% elif obs.resolution_status == 'failed' %}
               <span class="badge badge-danger">Failed</span>
             {% else %}

@@ -36,10 +36,8 @@
 
       <span class="detail-label">Resolution</span>
       <span class="detail-value">
-        {% if obs.resolution_status == 'vectorized' %}
-          <span class="badge badge-success">Vectorized</span>
-        {% elif obs.resolution_status == 'resolved' %}
-          <span class="badge badge-info">Resolved</span>
+        {% if obs.resolution_status == 'resolved' %}
+          <span class="badge badge-success">Resolved</span>
         {% elif obs.resolution_status == 'failed' %}
           <span class="badge badge-danger">Failed</span>
         {% else %}
@@ -81,43 +79,6 @@
     </div>
   </div>
 </div>
-
-{% if vector %}
-<div class="card mt-2">
-  <h2>Resolved Context (Vector)</h2>
-  <div class="detail-grid">
-    <span class="detail-label">Concept name</span>
-    <span class="detail-value">{{ vector.resolved_context_json.concept_name if vector.resolved_context_json else '—' }}</span>
-
-    <span class="detail-label">Activity</span>
-    <span class="detail-value">{{ vector.resolved_context_json.activity_description if vector.resolved_context_json else '—' }}</span>
-
-    <span class="detail-label">CarePlan</span>
-    <span class="detail-value monospace">{{ vector.careplan_guid or '—' }}</span>
-
-    <span class="detail-label">CarePlan title</span>
-    <span class="detail-value">{{ vector.resolved_context_json.careplan_title if vector.resolved_context_json else '—' }}</span>
-
-    <span class="detail-label">PlanDefinition</span>
-    <span class="detail-value monospace">{{ vector.plandef_guid or '—' }}</span>
-
-    <span class="detail-label">PlanDef title</span>
-    <span class="detail-value">{{ vector.resolved_context_json.plandef_title if vector.resolved_context_json else '—' }}</span>
-
-    <span class="detail-label">Vector model</span>
-    <span class="detail-value">{{ vector.vector_model or '—' }}</span>
-
-    <span class="detail-label">Has embedding</span>
-    <span class="detail-value">
-      {% if vector.embedding_json %}
-        <span class="badge badge-success">Yes ({{ vector.embedding_json|length }} dims)</span>
-      {% else %}
-        <span class="badge badge-warning">No</span>
-      {% endif %}
-    </span>
-  </div>
-</div>
-{% endif %}
 
 {% if audits %}
 <div class="card mt-2">

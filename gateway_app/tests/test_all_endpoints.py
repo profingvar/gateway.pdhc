@@ -185,29 +185,6 @@ class TestReceiptEndpoint:
         assert resp.get_json()['status'] == 'acknowledged'
 
 
-class TestVectorEndpoints:
-    """Vector query endpoints (experimental)."""
-
-    def test_by_patient(self, client, db):
-        resp = client.get('/api/v1/vectors/by-patient/p-1')
-        assert resp.status_code == 200
-        assert 'vectors' in resp.get_json()
-
-    def test_by_careplan(self, client, db):
-        resp = client.get('/api/v1/vectors/by-careplan/cp-1')
-        assert resp.status_code == 200
-
-    def test_similar(self, client, db):
-        resp = client.post('/api/v1/vectors/similar', json={'context': {}})
-        assert resp.status_code == 200
-
-    def test_resolve(self, client, db):
-        resp = client.post('/api/v1/vectors/resolve/sr-empty')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data['total'] == 0
-
-
 class TestMethodNotAllowed:
     """Verify correct 405 for wrong HTTP methods."""
 

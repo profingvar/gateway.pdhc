@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from flask import render_template, request as flask_request, flash, redirect, url_for, jsonify, current_app
 from . import web_bp
 from .auth import require_login, require_analyst, require_admin
-from ..models import InboundObservation, ObservationVector, AuditLog, ServiceRequestStatus
+from ..models import InboundObservation, AuditLog, ServiceRequestStatus
 from ..models.guid_resolution_cache import GuidResolutionCache
 from ..services.sso_service import get_access_blob, is_admin
 from ..extensions import db
@@ -66,9 +66,6 @@ def observation_detail(guid):
     """Detail view for a single observation."""
     obs = InboundObservation.query.filter_by(guid=guid).first_or_404()
 
-    # Get vector if it exists
-    vector = ObservationVector.query.filter_by(observation_guid=guid).first()
-
     # Get audit events for this SR
     audits = AuditLog.query.filter_by(
         receipt_token=obs.service_request_guid,
@@ -80,7 +77,6 @@ def observation_detail(guid):
     return render_template(
         'observation_detail.html',
         obs=obs,
-        vector=vector,
         audits=audits,
         receipt_sent=receipt_sent,
     )
