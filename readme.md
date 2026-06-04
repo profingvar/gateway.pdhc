@@ -7,6 +7,40 @@ FHIR R5 compliant. Dockerized. Consumes data from `provider.pdhc`.
 
 ---
 
+## Production deployment
+
+Live at <https://gateway.pdhc.se>. Deployment dir on miserver:
+`/usr/local/www/gateway.pdhc.se/` (git checkout, tracks `main`).
+Runs as the `gateway_pdhc_app` container alongside `gateway_pdhc_db`
+(both bound to `127.0.0.1`, fronted by miserver's nginx).
+
+After pushing a change to `main`, deploy with:
+
+```bash
+ssh miserver@192.168.1.154 'cd /usr/local/www/gateway.pdhc.se && \
+  git pull && \
+  cd gateway_app && \
+  docker-compose up -d --build app && \
+  docker exec gateway_pdhc_app flask db upgrade && \
+  curl -s http://127.0.0.1:9050/api/v1/health'
+```
+
+Notes:
+
+- The `docker compose` v2 plugin is NOT installed on miserver — use
+  the hyphenated `docker-compose` (v1). The script-side probe pattern
+  in CLAUDE.md §8 #3 applies.
+- Migrations do NOT auto-run on container start; the explicit
+  `docker exec gateway_pdhc_app flask db upgrade` is required.
+- `.env` is gitignored and stays on the server — production secrets
+  do not flow through the repo.
+- The `safe_restart.sh` + `start.sh` at the prod-dir root are leftovers
+  from the bare-metal era and should not be used (tracked: ticket
+  #234). Memory note: `infra_gateway_pdhc_bare_metal` (now updated to
+  reflect the containerised shape).
+
+---
+
 ## Role in the PDHC ecosystem
 
 Gateway.pdhc is the **inbound data gateway** — it receives observations and reports submitted by provider organisations. Provider.pdhc (the provider portal) submits structured FHIR Observation data after completing tasks dispatched via request.pdhc.
