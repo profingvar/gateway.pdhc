@@ -2,12 +2,13 @@ services:
   db:
     image: pgvector/pgvector:pg16
     container_name: gateway_pdhc_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gateway_pdhc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gateway_pdhc_dev}
       POSTGRES_DB: ${POSTGRES_DB:-gateway_pdhc_db}
     ports:
-      - "9051:5432"
+      - "127.0.0.1:9051:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,16 +20,15 @@ services:
   app:
     build: .
     container_name: gateway_pdhc_app
+    restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gateway_pdhc}:${POSTGRES_PASSWORD:-gateway_pdhc_dev}@db:5432/${POSTGRES_DB:-gateway_pdhc_db}
     ports:
-      - "9050:9050"
+      - "127.0.0.1:9050:9050"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - .:/app
 
 volumes:
   pgdata:
