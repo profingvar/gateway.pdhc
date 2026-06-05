@@ -27,6 +27,10 @@ from ..models import InboundObservation, ServiceRequestStatus, AuditLog, GuidRes
 from ..extensions import db
 from ..services.sso_service import validate_sso_token, has_analysis_access
 from ..services.contract_scope import ContractScopeService
+from ..services.ips_client import (
+    fetch_blocks_for_patients,
+    filter_blocked_observations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +95,14 @@ def list_observations():
         .order_by(InboundObservation.received_at.asc())
         .all()
     )
+
+    # Spärr Phase 3 — drop rows whose provider source is blocked for
+    # that patient. PDL Ch 4 § 4; ticket #206. We batch one IPS lookup
+    # per unique patient_guid (cache-bounded, 30 s TTL).
+    if obs_rows:
+        patient_guids = {r.patient_guid for r in obs_rows if r.patient_guid}
+        blocks_by_patient = fetch_blocks_for_patients(patient_guids)
+        obs_rows = filter_blocked_observations(obs_rows, blocks_by_patient)
 
     # Pre-load sr_context for all service requests in one query
     sr_guids = {r.service_request_guid for r in obs_rows if r.service_request_guid}
