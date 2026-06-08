@@ -165,7 +165,10 @@ class TestRequestingOrgFilter:
                    return_value=_blob([], admin=True)), _patch_parties():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
-                headers={'Authorization': 'Bearer t'},
+                headers={
+                    'Authorization': 'Bearer t',
+                    'X-Admin-Justification': 'incident response',
+                },
             )
         assert r.status_code == 200
         ids = [e['resource']['id'] for e in r.get_json()['entry']]
@@ -180,8 +183,124 @@ class TestRequestingOrgFilter:
                    return_value=_blob([], admin=True)), _patch_parties():
             r = client.get(
                 f'/api/v1/observations?organization={unknown_org}',
-                headers={'Authorization': 'Bearer t'},
+                headers={
+                    'Authorization': 'Bearer t',
+                    'X-Admin-Justification': 'incident response',
+                },
             )
         assert r.status_code == 200
         assert r.get_json()['total'] == 0
         assert r.get_json()['entry'] == []
+
+
+# ── #220: admin-bypass audited as distinct event ──────────────────────
+
+class TestAdminReadAudit:
+    """Ticket #220. An SU admin reading observations for an org outside
+    their own organisations writes ``observations.admin_read`` (not the
+    generic ``observations.read``) and the bypass requires an explicit
+    justification text via ``X-Admin-Justification``.
+    """
+
+    def test_admin_in_own_org_writes_observations_read(self, client, db):
+        from app.models import AuditLog
+        _seed(db)
+        # ORG_A is in the admin's organization_ids — no bypass triggered.
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_A], admin=True)), _patch_parties():
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        assert r.status_code == 200
+        rows = AuditLog.query.filter(
+            AuditLog.event_type.in_(
+                ['observations.read', 'observations.admin_read'],
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].event_type == 'observations.read'
+        assert 'justification' not in (rows[0].payload_snapshot or {})
+
+    def test_admin_outside_org_writes_admin_read_with_justification(
+        self, client, db,
+    ):
+        from app.models import AuditLog
+        _seed(db)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_B], admin=True)), _patch_parties():
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={
+                    'Authorization': 'Bearer t',
+                    'X-Admin-Justification': 'Patient SAR — req #4711',
+                },
+            )
+        assert r.status_code == 200
+        rows = AuditLog.query.filter(
+            AuditLog.event_type.in_(
+                ['observations.read', 'observations.admin_read'],
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].event_type == 'observations.admin_read'
+        snap = rows[0].payload_snapshot or {}
+        assert snap.get('justification') == 'Patient SAR — req #4711'
+        assert snap.get('org_guid') == ORG_A
+
+    def test_admin_outside_org_without_justification_400(self, client, db):
+        from app.models import AuditLog
+        _seed(db)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_B], admin=True)), _patch_parties():
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        assert r.status_code == 400
+        body = r.get_json()
+        assert 'justification' in body.get('error', '').lower()
+        # And no audit row is written for the rejected call — the bypass
+        # never executed.
+        assert AuditLog.query.filter(
+            AuditLog.event_type.in_(
+                ['observations.read', 'observations.admin_read'],
+            )
+        ).count() == 0
+
+    def test_admin_outside_org_whitespace_only_justification_400(
+        self, client, db,
+    ):
+        """An all-whitespace header is treated as missing — protects
+        against operator habit of typing a space to dismiss prompts."""
+        _seed(db)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_B], admin=True)), _patch_parties():
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={
+                    'Authorization': 'Bearer t',
+                    'X-Admin-Justification': '   ',
+                },
+            )
+        assert r.status_code == 400
+
+    def test_non_admin_in_own_org_still_writes_observations_read(
+        self, client, db,
+    ):
+        """Sanity: the spec change does not touch non-admin paths."""
+        from app.models import AuditLog
+        _seed(db)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_A])), _patch_parties():
+            client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        rows = AuditLog.query.filter(
+            AuditLog.event_type.in_(
+                ['observations.read', 'observations.admin_read'],
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].event_type == 'observations.read'

@@ -64,6 +64,20 @@ def list_observations():
     if not is_admin and org_guid not in user_orgs:
         return jsonify({'error': 'organization not in your scope'}), 403
 
+    # PDL Ch 4 §1 + Lag (2022:913) §5 (ticket #220). When an SU admin
+    # reads observations for an org outside their own affiliations, the
+    # read bypasses normal access scoping. That bypass must be
+    # explicitly justified and audited as a distinct event
+    # (observations.admin_read), not blended into the generic
+    # observations.read stream.
+    is_admin_bypass = is_admin and org_guid not in user_orgs
+    justification = (request.headers.get('X-Admin-Justification') or '').strip()
+    if is_admin_bypass and not justification:
+        return jsonify({
+            'error': 'X-Admin-Justification header required for admin '
+                     'cross-org read',
+        }), 400
+
     # Pull all inbound observations, then filter via contract → requesting org.
     # We group by contract_guid to avoid duplicate contract.pdhc lookups.
     sr_rows = ServiceRequestStatus.query.all()
@@ -138,7 +152,11 @@ def list_observations():
         'entry': [{'resource': _to_fhir_observation(r, sr_contexts, contract_scopes)} for r in obs_rows],
     }
 
-    _audit_observation_read(blob, org_guid, len(obs_rows))
+    _audit_observation_read(
+        blob, org_guid, len(obs_rows),
+        is_admin_bypass=is_admin_bypass,
+        justification=justification or None,
+    )
     return jsonify(bundle), 200
 
 
@@ -388,15 +406,29 @@ def _empty_bundle():
     }
 
 
-def _audit_observation_read(blob, org_guid, count):
+def _audit_observation_read(blob, org_guid, count, *,
+                            is_admin_bypass=False, justification=None):
+    """Persist one audit row for the observations read.
+
+    Ticket #220: emits ``observations.admin_read`` (with the operator's
+    justification text) when an SU admin reads outside their own orgs;
+    otherwise the generic ``observations.read`` stream.
+    """
     try:
+        event_type = (
+            'observations.admin_read' if is_admin_bypass
+            else 'observations.read'
+        )
+        snapshot = {'org_guid': org_guid, 'count': count}
+        if is_admin_bypass:
+            snapshot['justification'] = justification
         audit = AuditLog(
-            event_type='observations.read',
+            event_type=event_type,
             actor_guid=blob.get('user_guid'),
             receipt_token=org_guid,
             ip_address=request.remote_addr,
             correlation_id=request.headers.get('X-Correlation-Id'),
-            payload_snapshot={'org_guid': org_guid, 'count': count},
+            payload_snapshot=snapshot,
         )
         db.session.add(audit)
         db.session.commit()
