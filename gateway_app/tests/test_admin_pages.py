@@ -12,7 +12,7 @@ def _add_audit(db, event_type, actor_guid='org-AAA', data_subject_guid='patient-
         data_subject_guid=data_subject_guid,
         ip_address=ip_address,
         correlation_id=correlation_id,
-        receipt_token='sr-001',
+        resource_guid='sr-001',
     )
     db.session.add(e)
     db.session.commit()

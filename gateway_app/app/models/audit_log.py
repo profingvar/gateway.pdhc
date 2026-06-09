@@ -30,7 +30,13 @@ class AuditLog(db.Model):
     data_subject_guid = db.Column(db.String(36), nullable=True, index=True)
     # patient GUID — for GDPR subject access requests
 
-    receipt_token = db.Column(db.String(255), nullable=True, index=True)
+    # Ticket #224 — was receipt_token; renamed to align with the
+    # cross-service PDHC audit shape (ips.pdhc / request.pdhc both
+    # call this field resource_guid). Holds the primary resource guid
+    # the event was about: organisation guid for observations.read,
+    # service_request guid for bundle.downloaded / report.received,
+    # dispatch receipt guid for push.delivered, etc.
+    resource_guid = db.Column(db.String(255), nullable=True, index=True)
     payload_snapshot = db.Column(db.JSON, nullable=True)
     ip_address = db.Column(db.String(45), nullable=True)
     correlation_id = db.Column(db.String(36), nullable=True, index=True)
@@ -53,7 +59,7 @@ class AuditLog(db.Model):
             'event_type': self.event_type,
             'actor_guid': self.actor_guid,
             'data_subject_guid': self.data_subject_guid,
-            'receipt_token': self.receipt_token,
+            'resource_guid': self.resource_guid,
             'ip_address': self.ip_address,
             'correlation_id': self.correlation_id,
             'session_id': self.session_id,

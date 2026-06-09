@@ -83,7 +83,7 @@ def provider_feed():
             audit = AuditLog(
                 event_type='provider.feed.polled',
                 actor_guid=g.provider_org_guid,
-                receipt_token=None,
+                resource_guid=None,
                 ip_address=request.remote_addr,
                 correlation_id=request.headers.get('X-Correlation-Id'),
                 payload_snapshot={
@@ -119,7 +119,7 @@ def download_bundle(service_request_guid):
             audit = AuditLog(
                 event_type='bundle.downloaded',
                 actor_guid=g.provider_org_guid,
-                receipt_token=service_request_guid,
+                resource_guid=service_request_guid,
                 ip_address=request.remote_addr,
                 correlation_id=request.headers.get('X-Correlation-Id'),
                 payload_snapshot={

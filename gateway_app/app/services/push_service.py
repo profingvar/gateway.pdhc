@@ -213,7 +213,7 @@ def _audit_push(event_type, provider_org_guid, patient_guid,
             event_type=event_type,
             actor_guid=provider_org_guid,
             data_subject_guid=patient_guid,
-            receipt_token=receipt_guid,
+            resource_guid=receipt_guid,
             correlation_id=correlation_id,
             payload_snapshot=details,
         )

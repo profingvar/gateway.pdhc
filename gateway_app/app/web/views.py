@@ -46,10 +46,10 @@ def observations_list():
         sr_guids = list({o.service_request_guid for o in observations})
         receipt_events = AuditLog.query.filter(
             AuditLog.event_type == 'report.received',
-            AuditLog.receipt_token.in_(sr_guids),
+            AuditLog.resource_guid.in_(sr_guids),
         ).all()
         for evt in receipt_events:
-            receipt_lookup[evt.receipt_token] = True
+            receipt_lookup[evt.resource_guid] = True
 
     return render_template(
         'observations_list.html',
@@ -68,7 +68,7 @@ def observation_detail(guid):
 
     # Get audit events for this SR
     audits = AuditLog.query.filter_by(
-        receipt_token=obs.service_request_guid,
+        resource_guid=obs.service_request_guid,
     ).order_by(AuditLog.created_at.desc()).all()
 
     # Check receipt status

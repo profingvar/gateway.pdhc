@@ -65,7 +65,7 @@ class TestObservationsList:
                 event_type='report.received',
                 actor_guid='org-222',
                 data_subject_guid='patient-111',
-                receipt_token='sr-001',
+                resource_guid='sr-001',
                 ip_address='127.0.0.1',
             )
             db.session.add(audit)
@@ -99,7 +99,7 @@ class TestObservationDetail:
                 event_type='report.received',
                 actor_guid='org-222',
                 data_subject_guid='patient-111',
-                receipt_token='sr-001',
+                resource_guid='sr-001',
                 ip_address='127.0.0.1',
             )
             db.session.add(audit)

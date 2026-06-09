@@ -32,7 +32,7 @@ class ReceiptService:
         audit = AuditLog(
             event_type='receipt.acknowledged',
             actor_guid=provider_org_guid,
-            receipt_token=receipt_token,
+            resource_guid=receipt_token,
             ip_address=flask_request.remote_addr,
             correlation_id=flask_request.headers.get('X-Correlation-Id'),
             payload_snapshot={
