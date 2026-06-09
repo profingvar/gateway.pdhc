@@ -101,6 +101,14 @@ def list_observations():
     }
 
     if not matching_srs:
+        # #221 — kontroller cares "who tried", not just "who got data".
+        # An empty bundle still represents a read attempt; record it.
+        _audit_observation_read(
+            blob, org_guid, 0,
+            is_admin_bypass=is_admin_bypass,
+            justification=justification or None,
+            patient_guids=[],
+        )
         return jsonify(_empty_bundle()), 200
 
     obs_rows = (
@@ -152,10 +160,22 @@ def list_observations():
         'entry': [{'resource': _to_fhir_observation(r, sr_contexts, contract_scopes)} for r in obs_rows],
     }
 
+    # Ticket #221 — decided per-route audit granularity. The normal
+    # read keeps one row per query (cheaper, polling-friendly) but
+    # carries the patient_guids list in payload_snapshot so kontroller
+    # can answer "was patient P's data in any read by user X" without
+    # joining the bundle content. The admin bypass path explodes to
+    # per-patient rows — the bypass is rare and high-stakes, and the
+    # per-patient row carries the same justification on every entry
+    # so consumers can filter cheaply by patient.
+    patient_guids = sorted({
+        r.patient_guid for r in obs_rows if r.patient_guid
+    })
     _audit_observation_read(
         blob, org_guid, len(obs_rows),
         is_admin_bypass=is_admin_bypass,
         justification=justification or None,
+        patient_guids=patient_guids,
     )
     return jsonify(bundle), 200
 
@@ -407,30 +427,72 @@ def _empty_bundle():
 
 
 def _audit_observation_read(blob, org_guid, count, *,
-                            is_admin_bypass=False, justification=None):
-    """Persist one audit row for the observations read.
+                            is_admin_bypass=False, justification=None,
+                            patient_guids=None):
+    """Persist audit row(s) for the observations read.
 
-    Ticket #220: emits ``observations.admin_read`` (with the operator's
-    justification text) when an SU admin reads outside their own orgs;
-    otherwise the generic ``observations.read`` stream.
+    Audit granularity (ticket #221):
+      - ``observations.read`` (normal scope) — ONE row per query.
+        Carries the full ``patient_guids`` list in the snapshot so
+        kontroller can decide "was patient P in any read by user X"
+        without joining the bundle content.
+      - ``observations.admin_read`` (off-org bypass, #220) — ONE row
+        per patient touched. Each row carries the same justification
+        verbatim and the same correlation id so the bypass act is
+        reconstructable as a single operator action, but per-patient
+        filters work cheaply on the audit_log table directly.
+
+    The rationale for the split: normal reads run at high volume
+    (analyse phase polling); per-patient explode would inflate the
+    audit table 30-200x without changing what kontroller can answer
+    (the patient_guids array on the per-query row carries the same
+    information). Admin bypass is rare and high-stakes; per-patient
+    rows are warranted there even at higher cost.
+
+    See gateway_technical_guide.md "Read-side audit granularity" for
+    the full decision matrix.
     """
+    patient_guids = list(patient_guids or [])
+    correlation = request.headers.get('X-Correlation-Id')
     try:
-        event_type = (
-            'observations.admin_read' if is_admin_bypass
-            else 'observations.read'
-        )
-        snapshot = {'org_guid': org_guid, 'count': count}
         if is_admin_bypass:
-            snapshot['justification'] = justification
-        audit = AuditLog(
-            event_type=event_type,
-            actor_guid=blob.get('user_guid'),
-            receipt_token=org_guid,
-            ip_address=request.remote_addr,
-            correlation_id=request.headers.get('X-Correlation-Id'),
-            payload_snapshot=snapshot,
-        )
-        db.session.add(audit)
+            # Per-patient explode. If no patient guids were resolved
+            # (e.g. count=0), fall back to one row with an empty list
+            # so the bypass act is still recorded.
+            seeds = patient_guids or [None]
+            for pg in seeds:
+                snapshot = {
+                    'org_guid': org_guid,
+                    'count': count,
+                    'justification': justification,
+                    'granularity': 'per-patient',
+                    'patient_guid': pg,
+                    'n_patients': len(patient_guids),
+                }
+                db.session.add(AuditLog(
+                    event_type='observations.admin_read',
+                    actor_guid=blob.get('user_guid'),
+                    receipt_token=org_guid,
+                    ip_address=request.remote_addr,
+                    correlation_id=correlation,
+                    payload_snapshot=snapshot,
+                ))
+        else:
+            snapshot = {
+                'org_guid': org_guid,
+                'count': count,
+                'granularity': 'per-query',
+                'patient_guids': patient_guids,
+                'n_patients': len(patient_guids),
+            }
+            db.session.add(AuditLog(
+                event_type='observations.read',
+                actor_guid=blob.get('user_guid'),
+                receipt_token=org_guid,
+                ip_address=request.remote_addr,
+                correlation_id=correlation,
+                payload_snapshot=snapshot,
+            ))
         db.session.commit()
     except Exception:
         db.session.rollback()

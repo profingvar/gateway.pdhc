@@ -59,8 +59,46 @@ def provider_feed():
     - since: ISO-8601 datetime
     - limit: max results
     - cursor: pagination cursor
+
+    Audit granularity (ticket #221): **per-query**. The feed returns
+    metadata only — no patient observation data — and providers poll
+    on a 30s cadence. Per-patient audit rows on every poll would
+    multiply the audit table 30x without adding kontroller value
+    (PDL Ch 4 § 3 cares about reads of patient *data*; metadata
+    polling that yields no PHI is the wrong granularity for
+    per-patient rows). One row per call carrying the `since` cursor
+    and the result count is enough for kontroller to reconstruct
+    which feeds the provider polled.
     """
     data, status = FeedService.get_feed(g.raw_token)
+    if 200 <= status < 300:
+        try:
+            from ..models import AuditLog
+            from ..extensions import db
+            n_items = None
+            if isinstance(data, dict):
+                entries = data.get('entry') or data.get('items') or []
+                if isinstance(entries, list):
+                    n_items = len(entries)
+            audit = AuditLog(
+                event_type='provider.feed.polled',
+                actor_guid=g.provider_org_guid,
+                receipt_token=None,
+                ip_address=request.remote_addr,
+                correlation_id=request.headers.get('X-Correlation-Id'),
+                payload_snapshot={
+                    'provider_org_guid': g.provider_org_guid,
+                    'since': request.args.get('since'),
+                    'limit': request.args.get('limit'),
+                    'cursor': request.args.get('cursor'),
+                    'n_items': n_items,
+                    'granularity': 'per-query',
+                },
+            )
+            db.session.add(audit)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     return jsonify(data), status
 
 
