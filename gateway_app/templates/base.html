@@ -19,7 +19,6 @@
       {% if current_user %}
       <li><a href="{{ url_for('web.dashboard') }}" {% if request.endpoint == 'web.dashboard' %}class="active"{% endif %}>Dashboard</a></li>
       {% if is_analyst or is_admin %}
-      <li><a href="{{ url_for('web.observations_list') }}" {% if request.endpoint in ('web.observations_list', 'web.observation_detail') %}class="active"{% endif %}>Observations</a></li>
       <li><a href="{{ url_for('web.requests_list') }}" {% if request.endpoint == 'web.requests_list' %}class="active"{% endif %}>Requests</a></li>
       {% endif %}
       {% if is_admin %}

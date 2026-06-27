@@ -48,11 +48,6 @@ class TestHealthEndpoints:
         resp = client.get('/')
         assert resp.status_code == 200
 
-    def test_observations_page(self, client, db):
-        resp = client.get('/observations')
-        assert resp.status_code == 200
-
-
 class TestProviderReportEndpoint:
     """POST /api/v1/provider/report/<sr_guid>"""
 

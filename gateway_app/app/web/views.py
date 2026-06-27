@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from flask import render_template, request as flask_request, flash, redirect, url_for, jsonify, current_app
 from . import web_bp
 from .auth import require_login, require_analyst, require_admin
-from ..models import InboundObservation, AuditLog, ServiceRequestStatus
+from ..models import AuditLog, ServiceRequestStatus
 from ..models.guid_resolution_cache import GuidResolutionCache
 from ..services.sso_service import get_access_blob, is_admin
 from ..extensions import db
@@ -15,71 +15,6 @@ logger = logging.getLogger(__name__)
 @require_login
 def dashboard():
     return render_template('dashboard.html')
-
-
-@web_bp.route('/observations')
-@require_analyst
-def observations_list():
-    """List inbound observations with optional patient GUID filter."""
-    patient_filter = flask_request.args.get('patient_guid', '').strip()
-    page = flask_request.args.get('page', 1, type=int)
-    per_page = 50
-
-    query = InboundObservation.query.order_by(InboundObservation.received_at.desc())
-
-    # Non-admin analysts only see observations for their organization's patients
-    blob = get_access_blob()
-    if blob and not is_admin(blob):
-        org_ids = blob.get('organization_ids') or []
-        if org_ids:
-            query = query.filter(InboundObservation.provider_org_guid.in_(org_ids))
-
-    if patient_filter:
-        query = query.filter(InboundObservation.patient_guid == patient_filter)
-
-    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    observations = pagination.items
-
-    # Build receipt status lookup — check audit_log for report.received events
-    receipt_lookup = {}
-    if observations:
-        sr_guids = list({o.service_request_guid for o in observations})
-        receipt_events = AuditLog.query.filter(
-            AuditLog.event_type == 'report.received',
-            AuditLog.resource_guid.in_(sr_guids),
-        ).all()
-        for evt in receipt_events:
-            receipt_lookup[evt.resource_guid] = True
-
-    return render_template(
-        'observations_list.html',
-        observations=observations,
-        pagination=pagination,
-        patient_filter=patient_filter,
-        receipt_lookup=receipt_lookup,
-    )
-
-
-@web_bp.route('/observations/<guid>')
-@require_analyst
-def observation_detail(guid):
-    """Detail view for a single observation."""
-    obs = InboundObservation.query.filter_by(guid=guid).first_or_404()
-
-    # Get audit events for this SR
-    audits = AuditLog.query.filter_by(
-        resource_guid=obs.service_request_guid,
-    ).order_by(AuditLog.created_at.desc()).all()
-
-    # Check receipt status
-    receipt_sent = any(a.event_type == 'report.received' for a in audits)
-
-    return render_template(
-        'observation_detail.html',
-        obs=obs,
-        audits=audits,
-        receipt_sent=receipt_sent,
-    )
 
 
 @web_bp.route('/requests')

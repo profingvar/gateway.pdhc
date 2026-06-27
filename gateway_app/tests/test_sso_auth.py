@@ -146,16 +146,6 @@ class TestRoleAccess:
         resp = sso_client.get('/')
         assert resp.status_code == 200
 
-    def test_observations_accessible_to_analyst(self, sso_client):
-        _login_as(sso_client, ANALYST_BLOB)
-        resp = sso_client.get('/observations')
-        assert resp.status_code == 200
-
-    def test_observations_accessible_to_admin(self, sso_client):
-        _login_as(sso_client, ADMIN_BLOB)
-        resp = sso_client.get('/observations')
-        assert resp.status_code == 200
-
     def test_requests_accessible_to_analyst(self, sso_client):
         _login_as(sso_client, ANALYST_BLOB)
         resp = sso_client.get('/requests')
@@ -203,7 +193,6 @@ class TestNavVisibility:
         _login_as(sso_client, ADMIN_BLOB)
         resp = sso_client.get('/')
         html = resp.data.decode('utf-8')
-        assert 'Observations' in html
         assert 'PATs' in html
         assert 'Audit' in html
         assert 'Grants' in html
@@ -216,7 +205,6 @@ class TestNavVisibility:
         html = resp.data.decode('utf-8')
         # Extract nav section only
         nav_html = html.split('<nav>')[1].split('</nav>')[0] if '<nav>' in html else html
-        assert 'Observations' in nav_html
         assert 'Requests' in nav_html
         assert 'PATs' not in nav_html
         assert 'Audit' not in nav_html
@@ -286,10 +274,6 @@ class TestAuthDisabledMode:
 
     def test_dashboard_no_login_needed(self, client):
         resp = client.get('/')
-        assert resp.status_code == 200
-
-    def test_observations_no_login_needed(self, client):
-        resp = client.get('/observations')
         assert resp.status_code == 200
 
     def test_pats_no_login_needed(self, client):
