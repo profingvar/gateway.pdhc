@@ -84,6 +84,40 @@ def _block(scope_id, *, lift_kind=None, lift_concepts=None,
     )
 
 
+# Phase 3 SSOT (#282): gateway proxies analyse-pull to cdr1. Mock the
+# proxy call so the spärr-filter assertions still exercise the
+# filtering logic — they no longer hit InboundObservation directly.
+def _cdr_search(service_request_guids, *, patient=None, request_id=''):
+    """Return the same FHIR Observation entries gateway would have
+    built from the seeded InboundObservation rows."""
+    entries = []
+    if SR in service_request_guids:
+        for obs_id, prov in [('obs-A', PROV_A), ('obs-B', PROV_B)]:
+            entries.append({'resource': {
+                'resourceType': 'Observation', 'id': obs_id,
+                'status': 'final',
+                'subject': {'reference': f'Patient/{PATIENT}'},
+                'effectiveDateTime': '2026-05-15T10:00:00+00:00',
+                'basedOn': [{'identifier': {'value': SR}}],
+                'performer': [{'identifier': {'value': prov}}],
+                'code': {'coding': [
+                    {'system': 'urn:pdhc:concept', 'code': 'c-glucose'},
+                ]},
+            }})
+    return {
+        'resourceType': 'Bundle', 'type': 'searchset',
+        'timestamp': '2026-06-27T00:00:00+00:00',
+        'total': len(entries), 'entry': entries,
+    }
+
+
+def _patch_cdr():
+    return patch(
+        'app.api.observations.CdrClient.search_observations',
+        side_effect=_cdr_search,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _flush_cache():
     ips_mod._cache.invalidate()
@@ -237,7 +271,7 @@ class TestEndpoint:
              patch(
                  'app.api.observations.ContractScopeService.fetch_parties',
                  side_effect=_parties_for,
-             ), \
+             ), _patch_cdr(), \
              patch(
                  'app.api.observations.fetch_blocks_for_patients',
                  return_value={PATIENT: [_block(PROV_A)]},
@@ -258,7 +292,7 @@ class TestEndpoint:
              patch(
                  'app.api.observations.ContractScopeService.fetch_parties',
                  side_effect=_parties_for,
-             ), \
+             ), _patch_cdr(), \
              patch(
                  'app.api.observations.fetch_blocks_for_patients',
                  return_value={},
@@ -277,7 +311,7 @@ class TestEndpoint:
              patch(
                  'app.api.observations.ContractScopeService.fetch_parties',
                  side_effect=_parties_for,
-             ), \
+             ), _patch_cdr(), \
              patch(
                  'app.api.observations.fetch_blocks_for_patients',
                  return_value={PATIENT: [_block(PROV_A), _block(PROV_B)]},
@@ -301,7 +335,7 @@ class TestEndpoint:
              patch(
                  'app.api.observations.ContractScopeService.fetch_parties',
                  side_effect=_parties_for,
-             ), \
+             ), _patch_cdr(), \
              patch(
                  'app.api.observations.fetch_blocks_for_patients',
                  return_value={PATIENT: [lift_block]},

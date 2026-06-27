@@ -110,3 +110,51 @@ class CdrClient:
         if 400 <= resp.status_code < 500:
             raise CdrRejected(resp.status_code, resp.text)
         raise CdrUnavailable(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+    @classmethod
+    def search_observations(cls, service_request_guids, *, patient=None,
+                            request_id=''):
+        """GET /api/v1/observations from cdr1 — analyse-pull proxy target.
+
+        Phase 3 of the SSOT cutover (ticket #282). Gateway pre-computes
+        which service-request guids belong to the requested
+        organisation (via contract.pdhc lookups) and asks cdr1 only for
+        those; cdr1 returns the matching FHIR R5 searchset Bundle.
+
+        Returns the parsed JSON Bundle on success, an empty Bundle on
+        empty input. Raises CdrRejected on 4xx, CdrUnavailable on 5xx
+        / network errors so callers can decide whether to surface a
+        hard failure or fall back to a soft empty result.
+        """
+        if not service_request_guids:
+            from datetime import datetime, timezone
+            return {
+                'resourceType': 'Bundle',
+                'type': 'searchset',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'total': 0,
+                'entry': [],
+            }
+
+        url = f"{cls._base_url()}/api/v1/observations"
+        timeout = current_app.config.get('CDR_TIMEOUT_SECONDS', 30)
+        params = [('service_request', g) for g in service_request_guids]
+        if patient:
+            params.append(('patient', patient))
+
+        try:
+            resp = requests.get(
+                url, params=params,
+                headers=cls._headers(request_id), timeout=timeout,
+            )
+        except requests.RequestException as e:
+            raise CdrUnavailable(str(e)) from e
+
+        if 200 <= resp.status_code < 300:
+            try:
+                return resp.json()
+            except ValueError:
+                return {}
+        if 400 <= resp.status_code < 500:
+            raise CdrRejected(resp.status_code, resp.text)
+        raise CdrUnavailable(f"HTTP {resp.status_code}: {resp.text[:200]}")

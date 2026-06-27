@@ -74,6 +74,45 @@ def _patch_parties():
     )
 
 
+# Map known SR guids → the FHIR Observation cdr1 would return for them.
+# Used by _patch_cdr below to simulate the proxy round-trip.
+_SR_TO_OBS = {
+    SR_A: {
+        'resourceType': 'Observation', 'id': 'obs-A',
+        'subject': {'reference': f'Patient/{PATIENT_1}'},
+        'basedOn': [{'identifier': {'value': SR_A}}],
+        'performer': [{'identifier': {'value': PROV_ORG}}],
+    },
+    SR_B: {
+        'resourceType': 'Observation', 'id': 'obs-B',
+        'subject': {'reference': f'Patient/{PATIENT_2}'},
+        'basedOn': [{'identifier': {'value': SR_B}}],
+        'performer': [{'identifier': {'value': PROV_ORG}}],
+    },
+}
+
+
+def _cdr_search(service_request_guids, *, patient=None, request_id=''):
+    """Stand-in for CdrClient.search_observations. Filters _SR_TO_OBS
+    by the requested SR set."""
+    entries = [
+        {'resource': _SR_TO_OBS[sr]} for sr in service_request_guids
+        if sr in _SR_TO_OBS
+    ]
+    return {
+        'resourceType': 'Bundle', 'type': 'searchset',
+        'timestamp': '2026-06-27T00:00:00+00:00',
+        'total': len(entries), 'entry': entries,
+    }
+
+
+def _patch_cdr():
+    return patch(
+        'app.api.observations.CdrClient.search_observations',
+        side_effect=_cdr_search,
+    )
+
+
 def _blob(orgs, admin=False, phases=('analysis',)):
     return {
         'user_guid': str(uuid.uuid4()),
@@ -134,7 +173,7 @@ class TestRequestingOrgFilter:
     def test_returns_only_obs_for_requesting_org(self, client, db):
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_A])), _patch_parties():
+                   return_value=_blob([ORG_A])), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -148,7 +187,7 @@ class TestRequestingOrgFilter:
     def test_other_org_gets_other_obs(self, client, db):
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_B])), _patch_parties():
+                   return_value=_blob([ORG_B])), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_B}',
                 headers={'Authorization': 'Bearer t'},
@@ -162,7 +201,7 @@ class TestRequestingOrgFilter:
         applies to the per-user-org check, not to requesting-org filtering."""
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([], admin=True)), _patch_parties():
+                   return_value=_blob([], admin=True)), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={
@@ -180,7 +219,7 @@ class TestRequestingOrgFilter:
         _seed(db)
         unknown_org = str(uuid.uuid4())
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([], admin=True)), _patch_parties():
+                   return_value=_blob([], admin=True)), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={unknown_org}',
                 headers={
@@ -207,7 +246,7 @@ class TestAdminReadAudit:
         _seed(db)
         # ORG_A is in the admin's organization_ids — no bypass triggered.
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_A], admin=True)), _patch_parties():
+                   return_value=_blob([ORG_A], admin=True)), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -228,7 +267,7 @@ class TestAdminReadAudit:
         from app.models import AuditLog
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_B], admin=True)), _patch_parties():
+                   return_value=_blob([ORG_B], admin=True)), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={
@@ -252,7 +291,7 @@ class TestAdminReadAudit:
         from app.models import AuditLog
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_B], admin=True)), _patch_parties():
+                   return_value=_blob([ORG_B], admin=True)), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -275,7 +314,7 @@ class TestAdminReadAudit:
         against operator habit of typing a space to dismiss prompts."""
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_B], admin=True)), _patch_parties():
+                   return_value=_blob([ORG_B], admin=True)), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={
@@ -292,7 +331,7 @@ class TestAdminReadAudit:
         from app.models import AuditLog
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
-                   return_value=_blob([ORG_A])), _patch_parties():
+                   return_value=_blob([ORG_A])), _patch_parties(), _patch_cdr():
             client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -304,3 +343,88 @@ class TestAdminReadAudit:
         ).all()
         assert len(rows) == 1
         assert rows[0].event_type == 'observations.read'
+
+
+# ── #282 SSOT phase 3 proxy behaviour ─────────────────────────────────
+
+class TestCdrProxyBehaviour:
+    """Phase 3 SSOT cutover (ticket #282). Gateway now proxies the
+    analyse-pull through to cdr1 via CdrClient.search_observations
+    instead of reading InboundObservation locally. Verifies the proxy
+    contract: SR pre-filter, cdr1-down fallback, spärr post-filter,
+    audit is still written gateway-side.
+    """
+
+    def test_passes_matching_sr_guids_to_cdr(self, client, db):
+        _seed(db)
+        captured = {}
+        def _capture(service_request_guids, *, patient=None, request_id=''):
+            captured['srs'] = list(service_request_guids)
+            return _cdr_search(service_request_guids, patient=patient,
+                               request_id=request_id)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_A])), _patch_parties(), \
+             patch('app.api.observations.CdrClient.search_observations',
+                   side_effect=_capture):
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        assert r.status_code == 200
+        assert captured['srs'] == [SR_A], \
+            f"gateway must pre-filter SRs to cdr1; got {captured['srs']}"
+
+    def test_cdr_unavailable_returns_502(self, client, db):
+        from app.services.cdr_client import CdrUnavailable
+        _seed(db)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_A])), _patch_parties(), \
+             patch('app.api.observations.CdrClient.search_observations',
+                   side_effect=CdrUnavailable('connect refused')):
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        assert r.status_code == 502
+        assert 'cdr1' in r.get_json()['error'].lower()
+
+    def test_audit_still_written_on_proxy_path(self, client, db):
+        from app.models import AuditLog
+        _seed(db)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_A])), _patch_parties(), _patch_cdr():
+            client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        rows = AuditLog.query.filter_by(event_type='observations.read').all()
+        assert len(rows) == 1
+        snap = rows[0].payload_snapshot or {}
+        # patient_guids should be sourced from the FHIR Bundle's
+        # subject.reference, not from InboundObservation.
+        assert snap.get('patient_guids') == [PATIENT_1]
+
+    def test_blocked_patient_filtered_post_cdr(self, client, db):
+        """Spärr (IPS block) filter still applies to the cdr1 result."""
+        from app.services.ips_client import Block
+        _seed(db)
+        block = Block(
+            guid='b1', patient_guid=PATIENT_1,
+            source_scope_type='clinic', source_scope_id=PROV_ORG,
+            is_active=True, lift_kind=None, lift_concept_guids=[],
+            lift_from_date=None, lift_until_date=None,
+        )
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=_blob([ORG_A])), _patch_parties(), \
+             _patch_cdr(), \
+             patch('app.api.observations.fetch_blocks_for_patients',
+                   return_value={PATIENT_1: [block]}):
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        assert r.status_code == 200
+        bundle = r.get_json()
+        # obs-A was the only match, and it is now spärrad → empty bundle.
+        assert bundle['total'] == 0
+        assert bundle['entry'] == []

@@ -2,35 +2,44 @@
 
 GET /api/v1/observations?organization=<org_guid>
 
-Auth: Authorization: Bearer <SSO token> — validated via the same SSO
-flow gateway already uses for its web routes.
+Phase 3 of the cdr1 SSOT cutover (ticket #282;
+docs/cdr1_ssot_cutover_plan.md §7). This endpoint used to read from
+gateway's own ``inbound_observations`` table; it now PROXIES to cdr1
+(Option A). Gateway keeps:
 
-Phase gate: caller must be SU admin OR have 'analysis' in effective_phases.
+  - SSO bearer validation + analyse-phase gate
+  - Org-membership check (admin bypass with X-Admin-Justification)
+  - Contract-scope filter (find SRs whose contract.requesting_org
+    matches the requested org)
+  - IPS-spärr filter on returned rows
+  - Audit (observations.read / observations.admin_read)
 
-Org scoping: org_guid must be in the caller's `organization_ids` blob
-field (admin bypass). The org_guid is treated as the *requesting*
-organisation — i.e. the org that ordered the underlying service request,
-which lives on the contract in contract.pdhc. We resolve every relevant
-contract via gateway's existing ContractScopeService cache and only
-return observations whose contract's requesting_org matches.
+What gateway no longer does:
 
-Returns a FHIR R5 searchset Bundle of Observation resources.
+  - Reading from InboundObservation
+  - Assembling the FHIR R5 Observation resource — cdr1 returns
+    already-assembled resources from its FhirResource table (gateway
+    forwarded them there in the same shape via the cdr_forwarder).
+
+The bundle gateway returns is the bundle cdr1 returns, post-filtered
+through the spärr check. Returned shape is identical to the
+pre-cutover bundle: FHIR R5 searchset Bundle of Observation resources.
 """
 from datetime import datetime, timezone
-import json
 import logging
 
-from flask import request, jsonify, current_app
+from flask import request, jsonify
 
 from . import api_bp
-from ..models import InboundObservation, ServiceRequestStatus, AuditLog, GuidResolutionCache
+from ..models import ServiceRequestStatus, AuditLog
 from ..extensions import db
 from ..services.sso_service import validate_sso_token, has_analysis_access
 from ..services.contract_scope import ContractScopeService
-from ..services.fhir_observation_builder import build_fhir_observation
+from ..services.cdr_client import CdrClient, CdrRejected, CdrUnavailable
 from ..services.ips_client import (
+    Block,
+    blocked_clinic_ids,
     fetch_blocks_for_patients,
-    filter_blocked_observations,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +50,87 @@ def _bearer_token():
     if not h.startswith('Bearer '):
         return None
     return h[7:].strip() or None
+
+
+def _patient_guid_from_resource(resource):
+    """Extract patient_guid from a FHIR Observation's subject.reference.
+
+    Returns None if the reference is absent or unparseable.
+    """
+    if not resource:
+        return None
+    subj = (resource.get('subject') or {}).get('reference') or ''
+    if not subj:
+        return None
+    return subj.rsplit('/', 1)[-1] or None
+
+
+def _provider_org_from_resource(resource):
+    for perf in (resource.get('performer') or []):
+        ident = (perf.get('identifier') or {}).get('value')
+        if ident:
+            return ident
+    return None
+
+
+def _concept_guid_from_resource(resource):
+    for coding in ((resource.get('code') or {}).get('coding') or []):
+        if coding.get('system') == 'urn:pdhc:concept':
+            return coding.get('code') or None
+    return None
+
+
+def _observed_iso_from_resource(resource):
+    return (resource.get('effectiveDateTime')
+            or resource.get('issued')
+            or None)
+
+
+def _resource_passes_any_lift(resource, blocks, provider):
+    """Mirror ips_client._row_passes_any_lift but for FHIR dicts."""
+    concept = str(_concept_guid_from_resource(resource) or '')
+    observed_iso = _observed_iso_from_resource(resource)
+    for b in blocks:
+        if b.source_scope_id != provider or b.source_scope_type != 'clinic':
+            continue
+        if b.lift_kind != 'indispensable_care' or not b.lift_concept_guids:
+            continue
+        allowed = {str(g) for g in (b.lift_concept_guids or [])}
+        if concept not in allowed:
+            continue
+        if b.lift_from_date and observed_iso and observed_iso < b.lift_from_date:
+            continue
+        if b.lift_until_date and observed_iso and observed_iso > b.lift_until_date:
+            continue
+        return True
+    return False
+
+
+def _drop_blocked_entries(entries, blocks_by_patient):
+    """Filter Bundle entries by IPS spärr (#206 / PDL Ch 4 §4).
+
+    Mirrors ``ips_client.filter_blocked_observations`` semantics
+    (clinic-scope block + indispensable_care lift) but operates on
+    FHIR Observation dicts rather than InboundObservation rows.
+    """
+    if not blocks_by_patient:
+        return entries
+    kept = []
+    for entry in entries:
+        resource = entry.get('resource') or {}
+        pg = _patient_guid_from_resource(resource)
+        blocks = blocks_by_patient.get(pg) or []
+        if not blocks:
+            kept.append(entry)
+            continue
+        blocked = blocked_clinic_ids(blocks)
+        provider = _provider_org_from_resource(resource)
+        if provider not in blocked:
+            kept.append(entry)
+            continue
+        if _resource_passes_any_lift(resource, blocks, provider):
+            kept.append(entry)
+    return kept
 
 
 @api_bp.route('/observations', methods=['GET'])
@@ -65,12 +155,7 @@ def list_observations():
     if not is_admin and org_guid not in user_orgs:
         return jsonify({'error': 'organization not in your scope'}), 403
 
-    # PDL Ch 4 §1 + Lag (2022:913) §5 (ticket #220). When an SU admin
-    # reads observations for an org outside their own affiliations, the
-    # read bypasses normal access scoping. That bypass must be
-    # explicitly justified and audited as a distinct event
-    # (observations.admin_read), not blended into the generic
-    # observations.read stream.
+    # #220 — admin cross-org read demands explicit justification.
     is_admin_bypass = is_admin and org_guid not in user_orgs
     justification = (request.headers.get('X-Admin-Justification') or '').strip()
     if is_admin_bypass and not justification:
@@ -79,15 +164,12 @@ def list_observations():
                      'cross-org read',
         }), 400
 
-    # Pull all inbound observations, then filter via contract → requesting org.
-    # We group by contract_guid to avoid duplicate contract.pdhc lookups.
+    # Resolve SR → contract → requesting_org locally. Gateway is the
+    # authoritative source for this mapping (contract.pdhc is its
+    # upstream, not cdr1's). Only the resulting SR list is sent to cdr1.
     sr_rows = ServiceRequestStatus.query.all()
     sr_to_contract = {r.service_request_guid: r.contract_guid for r in sr_rows}
 
-    # Resolve which contracts have requesting_org == org_guid.
-    # Admin bypasses the *user-orgs* check above (so they can query any
-    # org), but the requesting-org filter still applies — admin views the
-    # data as that org would see it.
     matching_contracts = set()
     for contract_guid in {c for c in sr_to_contract.values() if c}:
         parties = ContractScopeService.fetch_parties(contract_guid)
@@ -96,14 +178,15 @@ def list_observations():
         if parties.get('requesting_org_guid') == org_guid:
             matching_contracts.add(contract_guid)
 
-    matching_srs = {
+    matching_srs = sorted({
         sr_guid for sr_guid, c_guid in sr_to_contract.items()
         if c_guid in matching_contracts
-    }
+    })
+
+    correlation = request.headers.get('X-Correlation-Id') or ''
 
     if not matching_srs:
-        # #221 — kontroller cares "who tried", not just "who got data".
-        # An empty bundle still represents a read attempt; record it.
+        # #221 — record the read attempt even with empty result.
         _audit_observation_read(
             blob, org_guid, 0,
             is_admin_bypass=is_admin_bypass,
@@ -112,77 +195,57 @@ def list_observations():
         )
         return jsonify(_empty_bundle()), 200
 
-    obs_rows = (
-        InboundObservation.query
-        .filter(InboundObservation.service_request_guid.in_(matching_srs))
-        .order_by(InboundObservation.received_at.asc())
-        .all()
-    )
+    # Proxy to cdr1. cdr1 trusts gateway's auth decision; we forward
+    # X-Source-Service: gateway.pdhc + X-Service-Key + the
+    # pre-computed SR filter.
+    try:
+        bundle = CdrClient.search_observations(
+            matching_srs,
+            patient=None,
+            request_id=correlation or 'observations.read',
+        )
+    except CdrRejected as e:
+        logger.error("cdr1 rejected analyse-pull (%d): %s",
+                     e.status_code, e.body[:200])
+        return jsonify({'error': 'cdr1 rejected the request'}), 502
+    except CdrUnavailable as e:
+        logger.error("cdr1 unavailable for analyse-pull: %s", e)
+        return jsonify({'error': 'cdr1 unavailable'}), 502
+
+    entries = (bundle or {}).get('entry') or []
 
     # Spärr Phase 3 — drop rows whose provider source is blocked for
-    # that patient. PDL Ch 4 § 4; ticket #206. We batch one IPS lookup
-    # per unique patient_guid (cache-bounded, 30 s TTL).
-    if obs_rows:
-        patient_guids = {r.patient_guid for r in obs_rows if r.patient_guid}
-        blocks_by_patient = fetch_blocks_for_patients(patient_guids)
-        obs_rows = filter_blocked_observations(obs_rows, blocks_by_patient)
+    # that patient. PDL Ch 4 § 4; ticket #206. Single IPS round-trip
+    # bounded by unique patient_guids.
+    patient_guids = sorted({
+        _patient_guid_from_resource(e.get('resource'))
+        for e in entries
+        if _patient_guid_from_resource(e.get('resource'))
+    })
+    if entries and patient_guids:
+        blocks_by_patient = fetch_blocks_for_patients(set(patient_guids))
+        entries = _drop_blocked_entries(entries, blocks_by_patient)
+        patient_guids = sorted({
+            _patient_guid_from_resource(e.get('resource'))
+            for e in entries
+            if _patient_guid_from_resource(e.get('resource'))
+        })
 
-    # Pre-load sr_context for all service requests in one query
-    sr_guids = {r.service_request_guid for r in obs_rows if r.service_request_guid}
-    sr_contexts = {}
-    if sr_guids:
-        ctx_rows = (
-            GuidResolutionCache.query
-            .filter(GuidResolutionCache.source_type == 'sr_context',
-                    GuidResolutionCache.source_guid.in_(sr_guids))
-            .all()
-        )
-        for c in ctx_rows:
-            sr_contexts[c.source_guid] = c.resolved_json or {}
-
-    # Pre-load contract_scope for party info
-    contract_guids = {r.contract_guid for r in obs_rows if r.contract_guid}
-    contract_scopes = {}
-    if contract_guids:
-        scope_rows = (
-            GuidResolutionCache.query
-            .filter(GuidResolutionCache.source_type == 'contract_scope',
-                    GuidResolutionCache.source_guid.in_(contract_guids))
-            .all()
-        )
-        for c in scope_rows:
-            contract_scopes[c.source_guid] = c.resolved_json or {}
-
-    bundle = {
+    filtered_bundle = {
         'resourceType': 'Bundle',
         'type': 'searchset',
         'timestamp': datetime.now(timezone.utc).isoformat(),
-        'total': len(obs_rows),
-        'entry': [{'resource': _to_fhir_observation(r, sr_contexts, contract_scopes)} for r in obs_rows],
+        'total': len(entries),
+        'entry': entries,
     }
 
-    # Ticket #221 — decided per-route audit granularity. The normal
-    # read keeps one row per query (cheaper, polling-friendly) but
-    # carries the patient_guids list in payload_snapshot so kontroller
-    # can answer "was patient P's data in any read by user X" without
-    # joining the bundle content. The admin bypass path explodes to
-    # per-patient rows — the bypass is rare and high-stakes, and the
-    # per-patient row carries the same justification on every entry
-    # so consumers can filter cheaply by patient.
-    patient_guids = sorted({
-        r.patient_guid for r in obs_rows if r.patient_guid
-    })
     _audit_observation_read(
-        blob, org_guid, len(obs_rows),
+        blob, org_guid, len(entries),
         is_admin_bypass=is_admin_bypass,
         justification=justification or None,
         patient_guids=patient_guids,
     )
-    return jsonify(bundle), 200
-
-
-def _to_fhir_observation(row, sr_contexts=None, contract_scopes=None):
-    return build_fhir_observation(row, sr_contexts, contract_scopes)
+    return jsonify(filtered_bundle), 200
 
 
 def _empty_bundle():
@@ -225,9 +288,6 @@ def _audit_observation_read(blob, org_guid, count, *,
     correlation = request.headers.get('X-Correlation-Id')
     try:
         if is_admin_bypass:
-            # Per-patient explode. If no patient guids were resolved
-            # (e.g. count=0), fall back to one row with an empty list
-            # so the bypass act is still recorded.
             seeds = patient_guids or [None]
             for pg in seeds:
                 snapshot = {
