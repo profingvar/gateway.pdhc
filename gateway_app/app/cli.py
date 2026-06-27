@@ -24,6 +24,7 @@ from .models import InboundObservation, CdrDeliveryLog
 def register_cli(app):
     app.cli.add_command(backfill_cdr_from_inbound)
     app.cli.add_command(recover_failed_cdr)
+    app.cli.add_command(delete_already_delivered)
 
 
 @click.command('backfill-cdr-from-inbound')
@@ -125,3 +126,71 @@ def recover_failed_cdr(yes):
     )).rowcount
     db.session.commit()
     click.echo(f"Reset {updated} rows from 'failed' to 'pending'.")
+
+
+@click.command('delete-already-delivered')
+@click.option('--dry-run', is_flag=True,
+              help='Print what would happen without committing changes.')
+@click.option('--chunk', type=int, default=500,
+              help='Commit every N deletions.')
+@click.option('--yes', is_flag=True,
+              help='Required to run without --dry-run.')
+def delete_already_delivered(dry_run, chunk, yes):
+    """SSOT phase 5 (#284): delete InboundObservation rows for entries
+    whose CdrDeliveryLog row is already 'delivered'.
+
+    The FK on cdr_delivery_log.inbound_observation_guid is
+    ON DELETE SET NULL (since migration b5c6d7e8f9a0), so deleting
+    the inbound row nulls the back-ref automatically. Dedup keeps
+    working because the dedup columns live on the log row.
+
+    Use --dry-run first to confirm the count, then re-run with --yes
+    to apply.
+    """
+    bind = db.session
+
+    # Find all eligible inbound_observation guids: the log says
+    # delivered and the inbound row still exists.
+    candidates_sql = text("""
+        SELECT i.guid
+        FROM inbound_observations i
+        JOIN cdr_delivery_log d ON d.inbound_observation_guid = i.guid
+        WHERE d.status = 'delivered'
+        ORDER BY i.received_at ASC
+    """)
+    candidate_guids = [row.guid for row in bind.execute(candidates_sql)]
+
+    click.echo(f"Eligible InboundObservation rows to delete: {len(candidate_guids)}")
+    if not candidate_guids:
+        return
+
+    if dry_run:
+        click.echo("Dry-run: no changes committed. Re-run with --yes to apply.")
+        return
+    if not yes:
+        click.echo("Re-run with --yes to confirm deletion "
+                   "(or --dry-run to inspect).")
+        return
+
+    deleted = 0
+    batch = []
+    for guid in candidate_guids:
+        batch.append(guid)
+        if len(batch) >= chunk:
+            deleted += _delete_chunk(batch)
+            batch = []
+            click.echo(f"  deleted {deleted} so far …")
+    if batch:
+        deleted += _delete_chunk(batch)
+
+    click.echo(f"Deletion complete: {deleted} InboundObservation rows removed. "
+               "CdrDeliveryLog rows retained with inbound_observation_guid = NULL.")
+
+
+def _delete_chunk(guids):
+    n = db.session.execute(
+        text("DELETE FROM inbound_observations WHERE guid = ANY(:guids)"),
+        {'guids': guids},
+    ).rowcount
+    db.session.commit()
+    return n

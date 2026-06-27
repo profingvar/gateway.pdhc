@@ -57,6 +57,14 @@ class Config:
         'CDR_FORWARDING_ENABLED', '').lower() in ('1', 'true', 'yes')
     CDR_FORWARDING_INTERVAL_SECONDS = int(
         os.environ.get('CDR_FORWARDING_INTERVAL_SECONDS', '60'))
+    # SSOT phase 5 (#284) — when true, the forwarder deletes the
+    # InboundObservation row immediately after marking the
+    # CdrDeliveryLog row as delivered. cdr1 then becomes the sole
+    # source of truth for observation data. Default false so first
+    # deploy is dark; flip after running flask delete-already-delivered
+    # for the historical backlog.
+    CDR_FORWARDING_DELETE_AFTER_DELIVERY = os.environ.get(
+        'CDR_FORWARDING_DELETE_AFTER_DELIVERY', '').lower() in ('1', 'true', 'yes')
     # cdr1 expects X-Source-Service: gateway.pdhc + X-Service-Key. This
     # key MUST match cdr.pdhc/cdr_app/app/api/auth.py's
     # GATEWAY_PDHC_SERVICE_KEY config — operator copies it across.

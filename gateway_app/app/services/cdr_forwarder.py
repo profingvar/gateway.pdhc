@@ -18,6 +18,7 @@ Retry policy:
 """
 import logging
 from datetime import datetime, timezone
+from flask import current_app
 from sqlalchemy import text
 from ..extensions import db
 from ..models import CdrDeliveryLog, InboundObservation, AuditLog
@@ -37,21 +38,35 @@ def run_forwarding_cycle(app):
         if not app.config.get('CDR_FORWARDING_ENABLED'):
             return 0
 
-        # Claim rows: status=pending, ordered by created_at, FOR UPDATE SKIP LOCKED
-        # so two gunicorn workers can run schedulers concurrently without
-        # double-processing.
-        # NB: Postgres-only SQL; gateway always runs Postgres in prod.
+        # Claim rows: status=pending, ordered by created_at, FOR UPDATE
+        # SKIP LOCKED on Postgres so two gunicorn workers can run
+        # schedulers concurrently without double-processing.
+        # SQLite (test suite) doesn't support SKIP LOCKED; fall back to
+        # plain SELECT which is safe because tests run single-process.
+        dialect = db.engine.dialect.name
+        if dialect == 'postgresql':
+            claim_sql = text(
+                """
+                SELECT guid FROM cdr_delivery_log
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT :lim
+                FOR UPDATE SKIP LOCKED
+                """
+            )
+        else:
+            claim_sql = text(
+                """
+                SELECT guid FROM cdr_delivery_log
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT :lim
+                """
+            )
         try:
             claimed_guids = [
-                row[0] for row in db.session.execute(text(
-                    """
-                    SELECT guid FROM cdr_delivery_log
-                    WHERE status = 'pending'
-                    ORDER BY created_at ASC
-                    LIMIT :lim
-                    FOR UPDATE SKIP LOCKED
-                    """
-                ), {'lim': BATCH_LIMIT}).fetchall()
+                row[0] for row in db.session.execute(
+                    claim_sql, {'lim': BATCH_LIMIT}).fetchall()
             ]
         except Exception as e:
             db.session.rollback()
@@ -156,6 +171,19 @@ def _deliver_one(log):
             'cdr_resource_id': log.cdr_resource_id,
         },
     ))
+
+    # SSOT phase 5 (#284) — the InboundObservation row is no longer
+    # needed once cdr1 has accepted it. The dedup keys live on
+    # CdrDeliveryLog (#280), the receipt-service queries cdr1 (#281),
+    # the analyse-pull endpoint proxies to cdr1 (#282), and the admin
+    # UI is gone (#283). Deletion is gated by config so the cutover
+    # can be staged: deploy → run flask delete-already-delivered for
+    # the backlog → flip the flag.
+    if current_app.config.get('CDR_FORWARDING_DELETE_AFTER_DELIVERY'):
+        # The FK was relaxed to ON DELETE SET NULL in migration
+        # b5c6d7e8f9a0; deleting obs_row will null the log's
+        # inbound_observation_guid automatically.
+        db.session.delete(obs_row)
     return True
 
 
