@@ -10,6 +10,12 @@ class CdrDeliveryLog(db.Model):
     (the cdr1 → real-Cambio sender) — same insert-then-send pattern,
     same retry-via-status semantics, simplified to a single delivery
     type (FHIR; gateway never emits openEHR).
+
+    Carries enough denormalised dedup keys (payload_hash, dedup_key,
+    service_request_guid) that the report-ingestion dedup checks can
+    use this table directly, and the row survives deletion of the
+    source InboundObservation row (phase 5 of the SSOT cutover; see
+    docs/cdr1_ssot_cutover_plan.md).
     """
     __tablename__ = 'cdr_delivery_log'
 
@@ -18,12 +24,21 @@ class CdrDeliveryLog(db.Model):
 
     inbound_observation_guid = db.Column(
         db.String(36),
-        db.ForeignKey('inbound_observations.guid'),
-        nullable=False,
+        db.ForeignKey('inbound_observations.guid', ondelete='SET NULL'),
+        nullable=True,
         unique=True,
         index=True,
     )
     patient_guid = db.Column(db.String(36), nullable=False, index=True)
+
+    # Denormalised dedup + traceability columns — populated by the
+    # report_ingestion hook and used by the dedup queries in the same
+    # module. Survive deletion of the InboundObservation row.
+    payload_hash = db.Column(db.String(64), nullable=True, index=True)
+    dedup_key = db.Column(db.String(64), nullable=True, index=True)
+    service_request_guid = db.Column(db.String(36), nullable=True, index=True)
+    concept_guid = db.Column(db.String(36), nullable=True, index=True)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     cdr_resource_id = db.Column(db.String(128), nullable=True)
 

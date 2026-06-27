@@ -295,15 +295,22 @@ class ReportIngestionService:
         # If scope service unavailable or no scope defined: proceed (fail-open for availability)
 
         # ── Step 8: Idempotency check ──────────────────────────────
+        # Dedup now reads CdrDeliveryLog (phase 1 of the SSOT cutover;
+        # docs/cdr1_ssot_cutover_plan.md §5). The log row outlives the
+        # source InboundObservation row in later phases. receipt_guid
+        # prefers the (still-existing) inbound guid for backwards
+        # compatibility; falls back to the log guid once phase 5
+        # nulls the FK.
         payload_hash = InboundObservation.hash_payload(report_payload)
-        existing = InboundObservation.query.filter_by(
+        existing = CdrDeliveryLog.query.filter_by(
             service_request_guid=service_request_guid,
             payload_hash=payload_hash,
         ).first()
         if existing:
             return {
                 'status': 'accepted',
-                'receipt_guid': existing.guid,
+                'receipt_guid': (existing.inbound_observation_guid
+                                 or existing.guid),
                 'service_request_guid': service_request_guid,
                 'action': 'duplicate_ignored',
             }
@@ -336,7 +343,8 @@ class ReportIngestionService:
                     seen_in_batch.add(dedup_key)
                     # Cross-batch dedup — was this (patient,tx,recorded_at)
                     # already stored on a prior submission of this SR?
-                    prior = InboundObservation.query.filter_by(
+                    # Queries CdrDeliveryLog (phase 1 SSOT cutover).
+                    prior = CdrDeliveryLog.query.filter_by(
                         service_request_guid=service_request_guid,
                         dedup_key=dedup_key,
                     ).first()
@@ -345,7 +353,8 @@ class ReportIngestionService:
                             'observation_index': idx,
                             'transaction_guid': obs.get('transaction_guid'),
                             'reason': 'duplicate_prior_submission',
-                            'receipt_guid': prior.guid,
+                            'receipt_guid': (prior.inbound_observation_guid
+                                             or prior.guid),
                         })
                         continue
                 record = InboundObservation(
@@ -371,6 +380,11 @@ class ReportIngestionService:
                 db.session.add(CdrDeliveryLog(
                     inbound_observation_guid=record.guid,
                     patient_guid=record.patient_guid,
+                    payload_hash=record.payload_hash,
+                    dedup_key=record.dedup_key,
+                    service_request_guid=record.service_request_guid,
+                    concept_guid=record.concept_guid,
+                    received_at=record.received_at,
                     status=('pending' if record.resolution_status == 'resolved'
                             else 'skipped'),
                 ))
@@ -391,10 +405,14 @@ class ReportIngestionService:
             db.session.add(record)
             db.session.flush()  # populate record.guid for FK below
             stored.append(record)
-            # No concept_guid → not forwardable. Log as skipped.
+            # No concept_guid → not forwardable. Log as skipped, but
+            # still carry payload_hash so re-POST dedup works.
             db.session.add(CdrDeliveryLog(
                 inbound_observation_guid=record.guid,
                 patient_guid=record.patient_guid,
+                payload_hash=record.payload_hash,
+                service_request_guid=record.service_request_guid,
+                received_at=record.received_at,
                 status='skipped',
             ))
 
@@ -472,15 +490,18 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
     holding the full QR resource, plus one child record per answered item
     (response_type set per answer type: 'numeric', 'choice', 'text', etc.).
     """
+    # QR endpoint dedup — same as Step 8 in the main path, queries
+    # CdrDeliveryLog (phase 1 SSOT cutover).
     payload_hash = InboundObservation.hash_payload(report_payload)
-    existing = InboundObservation.query.filter_by(
+    existing = CdrDeliveryLog.query.filter_by(
         service_request_guid=sr_guid,
         payload_hash=payload_hash,
     ).first()
     if existing:
         return {
             'status': 'accepted',
-            'receipt_guid': existing.guid,
+            'receipt_guid': (existing.inbound_observation_guid
+                             or existing.guid),
             'service_request_guid': sr_guid,
             'action': 'duplicate_ignored',
         }
@@ -553,6 +574,9 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
             db.session.add(CdrDeliveryLog(
                 inbound_observation_guid=child.guid,
                 patient_guid=child.patient_guid,
+                service_request_guid=child.service_request_guid,
+                concept_guid=child.concept_guid,
+                received_at=child.received_at,
                 status=('pending' if concept_code else 'skipped'),
             ))
 
