@@ -86,6 +86,35 @@ def _patch_parties():
     )
 
 
+# Phase 3 SSOT (#282): gateway proxies analyse-pull to cdr1. The audit
+# tests only care about audit shape; the bundle they would have
+# observed must come back through the mocked CdrClient.
+def _cdr_search(service_request_guids, *, patient=None, request_id=''):
+    sr_to_patients = {SR_A: [PATIENT_1, PATIENT_3], SR_C: [PATIENT_2]}
+    entries = []
+    for sr in service_request_guids:
+        for pg in sr_to_patients.get(sr, []):
+            entries.append({'resource': {
+                'resourceType': 'Observation',
+                'id': f'obs-{pg[:6]}',
+                'subject': {'reference': f'Patient/{pg}'},
+                'basedOn': [{'identifier': {'value': sr}}],
+                'performer': [{'identifier': {'value': PROV_ORG}}],
+            }})
+    return {
+        'resourceType': 'Bundle', 'type': 'searchset',
+        'timestamp': '2026-06-27T00:00:00+00:00',
+        'total': len(entries), 'entry': entries,
+    }
+
+
+def _patch_cdr():
+    return patch(
+        'app.api.observations.CdrClient.search_observations',
+        side_effect=_cdr_search,
+    )
+
+
 def _blob(orgs, admin=False, phases=('analysis',)):
     return {
         'user_guid': str(uuid.uuid4()),
@@ -107,7 +136,7 @@ class TestObservationsReadPerQuery:
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_A], admin=False),
-        ), _patch_parties():
+        ), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -129,7 +158,7 @@ class TestObservationsReadPerQuery:
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_A], admin=False),
-        ), _patch_parties():
+        ), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -156,7 +185,7 @@ class TestObservationsAdminReadPerPatient:
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_B], admin=True),
-        ), _patch_parties():
+        ), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={
@@ -191,7 +220,7 @@ class TestObservationsAdminReadPerPatient:
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_B], admin=True),
-        ), _patch_parties():
+        ), _patch_parties(), _patch_cdr():
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={
@@ -220,7 +249,7 @@ class TestObservationsAdminReadPerPatient:
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_A], admin=False),
-        ), _patch_parties():
+        ), _patch_parties(), _patch_cdr():
             client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
@@ -229,7 +258,7 @@ class TestObservationsAdminReadPerPatient:
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_B], admin=True),
-        ), _patch_parties():
+        ), _patch_parties(), _patch_cdr():
             client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={
