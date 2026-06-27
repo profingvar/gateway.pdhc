@@ -760,3 +760,99 @@ class TestDedupAfterInboundDeleted:
         assert d['observations_stored'] == 0, d
         assert any(i['reason'] == 'duplicate_prior_submission'
                    for i in d.get('observations_ignored', [])), d
+
+
+class TestReceiptLookupSources:
+    """SSOT phase 2 (#281): receipt_service's local-record lookup goes
+    through CdrDeliveryLog first, then falls back to cdr1 via HTTP.
+    Verifies all three branches by inspecting the audit payload.
+    """
+
+    def _last_receipt_audit(self, app):
+        from app.models import AuditLog
+        with app.app_context():
+            return (AuditLog.query
+                    .filter_by(event_type='receipt.acknowledged')
+                    .order_by(AuditLog.created_at.desc())
+                    .first())
+
+    def test_ack_local_hit_via_service_request_guid(self, client, app, db):
+        """A CdrDeliveryLog row exists for this SR → lookup_source='local'."""
+        from app.models import CdrDeliveryLog
+        sr = 'sr-receipt-local-1'
+        with app.app_context():
+            db.session.add(CdrDeliveryLog(
+                inbound_observation_guid=None,
+                patient_guid='pat-r1',
+                service_request_guid=sr,
+                payload_hash='hash-1',
+                status='delivered',
+            ))
+            db.session.commit()
+        with patch('app.services.pat_validation.http_requests.post', _mock_pat_ok):
+            resp = client.post(
+                f'/api/v1/provider/receipt/{sr}/ack',
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        assert resp.status_code == 200
+        audit = self._last_receipt_audit(app)
+        assert audit is not None
+        assert audit.payload_snapshot['has_local_record'] is True
+        assert audit.payload_snapshot['lookup_source'] == 'local'
+
+    def test_ack_cdr1_fallback_hit(self, client, app, db):
+        app.config["GATEWAY_PDHC_SERVICE_KEY"] = "test-key"
+        app.config["CDR_BASE_URL"] = "http://cdr-test/"
+        """No local row → fall back to cdr1; cdr1 returns 200 → lookup_source='cdr1'."""
+        class Resp:
+            status_code = 200
+            def json(self):
+                return {'guid': 'cdr-raw-1', 'status': 'stored'}
+        with patch('app.services.pat_validation.http_requests.post', _mock_pat_ok), \
+             patch('app.services.receipt_service.requests.get',
+                   return_value=Resp()):
+            resp = client.post(
+                '/api/v1/provider/receipt/never-stored-locally/ack',
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        assert resp.status_code == 200
+        audit = self._last_receipt_audit(app)
+        assert audit.payload_snapshot['has_local_record'] is True
+        assert audit.payload_snapshot['lookup_source'] == 'cdr1'
+
+    def test_ack_cdr1_404_is_miss(self, client, app, db):
+        app.config["GATEWAY_PDHC_SERVICE_KEY"] = "test-key"
+        app.config["CDR_BASE_URL"] = "http://cdr-test/"
+        class Resp:
+            status_code = 404
+            def json(self):
+                return {'error': 'not found'}
+        with patch('app.services.pat_validation.http_requests.post', _mock_pat_ok), \
+             patch('app.services.receipt_service.requests.get',
+                   return_value=Resp()):
+            resp = client.post(
+                '/api/v1/provider/receipt/totally-unknown/ack',
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        assert resp.status_code == 200  # ack always succeeds
+        audit = self._last_receipt_audit(app)
+        assert audit.payload_snapshot['has_local_record'] is False
+        assert audit.payload_snapshot['lookup_source'] == 'none'
+
+    def test_ack_cdr1_unreachable_is_graceful_miss(self, client, app, db):
+        app.config["GATEWAY_PDHC_SERVICE_KEY"] = "test-key"
+        app.config["CDR_BASE_URL"] = "http://cdr-test/"
+        from requests import ConnectionError as ReqConnErr
+        with patch('app.services.pat_validation.http_requests.post', _mock_pat_ok), \
+             patch('app.services.receipt_service.requests.get',
+                   side_effect=ReqConnErr('cdr1 down')):
+            resp = client.post(
+                '/api/v1/provider/receipt/whatever-token/ack',
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        # Ack must still succeed even though cdr1 is down — graceful
+        # failure mode.
+        assert resp.status_code == 200
+        audit = self._last_receipt_audit(app)
+        assert audit.payload_snapshot['has_local_record'] is False
+        assert audit.payload_snapshot['lookup_source'] == 'none'
