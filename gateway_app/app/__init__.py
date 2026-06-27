@@ -73,11 +73,54 @@ def create_app(config_class=Config):
     with app.app_context():
         _bootstrap_admin(app)
 
-    
+
     _register_metadata(app)
     _register_stockholm_filter(app)
+    _register_cli(app)
+    _start_cdr_forwarder_scheduler(app)
 
     return app
+
+
+def _register_cli(app):
+    """Wire flask CLI commands (backfill, recover)."""
+    from .cli import register_cli
+    register_cli(app)
+
+
+def _start_cdr_forwarder_scheduler(app):
+    """Start background APScheduler for forwarding observations to cdr.pdhc.
+
+    Gated on CDR_FORWARDING_ENABLED=true so first deploy can be dark.
+    Mirrors cdr.pdhc/cdr_app/app/__init__.py _start_delivery_scheduler.
+
+    Both gunicorn workers will start a scheduler; the worker uses
+    SELECT ... FOR UPDATE SKIP LOCKED to avoid double-processing.
+    """
+    if app.config.get('TESTING'):
+        return
+    if not app.config.get('CDR_FORWARDING_ENABLED'):
+        app.logger.info('CDR forwarder scheduler not started (disabled by env)')
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from .services.cdr_forwarder import run_forwarding_cycle
+
+        interval = int(app.config.get('CDR_FORWARDING_INTERVAL_SECONDS', 60))
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(
+            run_forwarding_cycle,
+            'interval',
+            seconds=interval,
+            args=[app],
+            id='cdr_forwarder',
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.start()
+        app.logger.info('CDR forwarder scheduler started (%ds interval)', interval)
+    except Exception as e:
+        app.logger.warning('Could not start CDR forwarder scheduler: %s', e)
 
 
 def _enable_pgvector(app):

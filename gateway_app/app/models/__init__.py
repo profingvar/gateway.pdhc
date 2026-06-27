@@ -3,6 +3,7 @@ from .guid_resolution_cache import GuidResolutionCache
 from .validation_log import ValidationLog
 from .audit_log import AuditLog
 from .service_request_status import ServiceRequestStatus
+from .cdr_delivery_log import CdrDeliveryLog
 
 __all__ = [
     'InboundObservation',
@@ -10,4 +11,5 @@ __all__ = [
     'ValidationLog',
     'AuditLog',
     'ServiceRequestStatus',
+    'CdrDeliveryLog',
 ]

@@ -36,7 +36,7 @@ body are cross-checked against the derived values if present.
 import logging
 from datetime import datetime, timezone
 from flask import g, current_app, request as flask_request
-from ..models import InboundObservation, AuditLog
+from ..models import InboundObservation, AuditLog, CdrDeliveryLog
 from ..extensions import db
 from ..errors import APIError
 from .grant_validation import GrantValidationService
@@ -366,7 +366,14 @@ class ReportIngestionService:
                     is_late=is_late,
                 )
                 db.session.add(record)
+                db.session.flush()  # populate record.guid for FK below
                 stored.append(record)
+                db.session.add(CdrDeliveryLog(
+                    inbound_observation_guid=record.guid,
+                    patient_guid=record.patient_guid,
+                    status=('pending' if record.resolution_status == 'resolved'
+                            else 'skipped'),
+                ))
         else:
             # Manual/freeform mode — store whole payload as single record
             record = InboundObservation(
@@ -382,7 +389,14 @@ class ReportIngestionService:
                 is_late=is_late,
             )
             db.session.add(record)
+            db.session.flush()  # populate record.guid for FK below
             stored.append(record)
+            # No concept_guid → not forwardable. Log as skipped.
+            db.session.add(CdrDeliveryLog(
+                inbound_observation_guid=record.guid,
+                patient_guid=record.patient_guid,
+                status='skipped',
+            ))
 
         # ── Step 10: Audit ──────────────────────────────────────────
         audit = AuditLog(
@@ -530,7 +544,17 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                 is_late=is_late,
             )
             db.session.add(child)
+            db.session.flush()  # populate child.guid for FK below
             stored_items.append(child)
+            # QR child has a concept_guid (or linkId fallback). cdr1's
+            # FHIR transformer expects a real concept_guid, so mark
+            # 'skipped' when concept_code is empty and the linkId was
+            # used as a fallback — see services/fhir_observation_builder.
+            db.session.add(CdrDeliveryLog(
+                inbound_observation_guid=child.guid,
+                patient_guid=child.patient_guid,
+                status=('pending' if concept_code else 'skipped'),
+            ))
 
     audit = AuditLog(
         event_type='report.received',

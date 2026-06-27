@@ -47,6 +47,21 @@ class Config:
     SSO_CALLBACK_URL = os.environ.get('SSO_CALLBACK_URL', 'https://gateway.pdhc.se/auth/callback')
     AUTH_DISABLED = os.environ.get('AUTH_DISABLED', '').lower() in ('1', 'true', 'yes')
 
+    # Downstream cdr.pdhc (cdr1) — single source of truth that simulates
+    # Cambio CDR. Insert-then-send forwarder pushes new inbound
+    # observations onward; APScheduler polls cdr_delivery_log every
+    # CDR_FORWARDING_INTERVAL_SECONDS.
+    CDR_BASE_URL = os.environ.get('CDR_BASE_URL', 'http://cdr_pdhc_app:9046')
+    CDR_TIMEOUT_SECONDS = int(os.environ.get('CDR_TIMEOUT_SECONDS', '30'))
+    CDR_FORWARDING_ENABLED = os.environ.get(
+        'CDR_FORWARDING_ENABLED', '').lower() in ('1', 'true', 'yes')
+    CDR_FORWARDING_INTERVAL_SECONDS = int(
+        os.environ.get('CDR_FORWARDING_INTERVAL_SECONDS', '60'))
+    # cdr1 expects X-Source-Service: gateway.pdhc + X-Service-Key. This
+    # key MUST match cdr.pdhc/cdr_app/app/api/auth.py's
+    # GATEWAY_PDHC_SERVICE_KEY config — operator copies it across.
+    GATEWAY_PDHC_SERVICE_KEY = os.environ.get('GATEWAY_PDHC_SERVICE_KEY', '')
+
 
 class TestConfig(Config):
     TESTING = True
