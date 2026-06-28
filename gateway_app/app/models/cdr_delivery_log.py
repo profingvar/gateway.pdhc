@@ -29,6 +29,19 @@ class CdrDeliveryLog(db.Model):
     # Denormalised dedup + traceability columns — populated by the
     # report_ingestion hook and used by the dedup queries in the same
     # module. Survive deletion of the InboundObservation row.
+    #
+    # #294 RFC F1 (2026-06-28) — Storage nullability is per-row-status:
+    #   - status='pending'  (production ingest path): service_request_guid,
+    #       concept_guid, contract_guid, provider_org_guid are REQUIRED.
+    #       Enforced at the application boundary (report_ingestion +
+    #       cdr_forwarder reject if any of these is None).
+    #   - status='skipped'  (QR child rows + freeform paths where
+    #       concept_code didn't resolve): same columns are EXPECTED
+    #       NULL. cdr1 never receives them; canonical schema documents
+    #       this exception.
+    # Storage stays nullable to preserve the "let it through, mark as
+    # skipped" semantics. Canonical schema (plans/pdhc_clinical_*.md §3)
+    # documents the per-status rule.
     payload_hash = db.Column(db.String(64), nullable=True, index=True)
     dedup_key = db.Column(db.String(64), nullable=True, index=True)
     service_request_guid = db.Column(db.String(36), nullable=True, index=True)

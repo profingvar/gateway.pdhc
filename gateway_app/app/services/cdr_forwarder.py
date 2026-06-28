@@ -120,6 +120,29 @@ def _deliver_one(log):
         _mark_failed_terminal(log, "Log row has no fhir_observation_json")
         return False
 
+    # #294 RFC F1 (2026-06-28): production-path guard. The canonical
+    # clinical-context schema requires service_request_guid,
+    # concept_guid, contract_guid, provider_org_guid on every
+    # `pending` row. report_ingestion sets status='skipped' (not
+    # 'pending') when concept_code didn't resolve or the row is a QR
+    # child — so reaching this point with any of these NULL means an
+    # incomplete production payload slipped through. Mark terminal
+    # rather than ship dirty data downstream.
+    required_missing = [
+        name for name, value in (
+            ('service_request_guid', log.service_request_guid),
+            ('concept_guid',         log.concept_guid),
+            ('contract_guid',        log.contract_guid),
+            ('provider_org_guid',    log.provider_org_guid),
+        ) if not value
+    ]
+    if required_missing:
+        _mark_failed_terminal(
+            log,
+            f"Production-path canonical fields NULL: {', '.join(required_missing)}",
+        )
+        return False
+
     payload = _build_payload(log)
 
     db.session.add(AuditLog(
