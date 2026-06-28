@@ -24,7 +24,7 @@ from unittest.mock import patch
 import pytest
 
 from app.extensions import db
-from app.models import AuditLog, InboundObservation, ServiceRequestStatus
+from app.models import AuditLog, ServiceRequestStatus, CdrDeliveryLog
 
 
 # Reuse the seed pattern from test_observations_endpoint so the
@@ -64,7 +64,7 @@ def _seed_multi_patient(db):
         (SR_C, PATIENT_2),
         (SR_A, PATIENT_3),
     ):
-        db.session.add(InboundObservation(
+        db.session.add(CdrDeliveryLog(
             service_request_guid=sr_guid, patient_guid=pg,
             provider_org_guid=PROV_ORG, contract_guid=CONTRACT_A,
             fhir_observation_json={
@@ -154,7 +154,7 @@ class TestObservationsReadPerQuery:
         ])
 
     def test_no_observations_still_writes_one_row(self, client, db):
-        # No InboundObservation rows seeded; only orgs.
+        # No CdrDeliveryLog rows seeded; only orgs.
         with patch(
             'app.api.observations.validate_sso_token',
             return_value=_blob([ORG_A], admin=False),

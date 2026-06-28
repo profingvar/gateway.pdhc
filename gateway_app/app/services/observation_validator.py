@@ -3,13 +3,11 @@
 Validates the observations array from a provider report submission.
 Required fields: transaction_guid, concept_guid, value, response_type.
 Optional fields (passed through, no validation): unit, notes, recorded_at.
-Validates response_type constraints and stores results in validation_log.
+Validates response_type constraints.
 
 Aligned with provider.pdhc's guided_response.py submission format.
 """
 import logging
-from ..models import ValidationLog
-from ..extensions import db
 
 logger = logging.getLogger(__name__)
 
@@ -144,17 +142,3 @@ class ObservationValidator:
                     f'Expected graph marker string, got {type(value).__name__}',
                 )
 
-    @staticmethod
-    def _log_result(observation_guid, result):
-        """Store validation result in validation_log."""
-        try:
-            entry = ValidationLog(
-                observation_guid=observation_guid,
-                validation_type='fhir_observation',
-                passed=result.valid,
-                error_details=result.errors if result.errors else None,
-            )
-            db.session.add(entry)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()

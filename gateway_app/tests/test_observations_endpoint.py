@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from app.models import InboundObservation, ServiceRequestStatus
+from app.models import ServiceRequestStatus, CdrDeliveryLog
 from app.extensions import db
 
 
@@ -40,7 +40,7 @@ def _seed(db):
         service_request_guid=SR_B, patient_guid=PATIENT_2,
         provider_org_guid=PROV_ORG, contract_guid=CONTRACT_B,
     ))
-    db.session.add(InboundObservation(
+    db.session.add(CdrDeliveryLog(
         service_request_guid=SR_A, patient_guid=PATIENT_1,
         provider_org_guid=PROV_ORG, contract_guid=CONTRACT_A,
         fhir_observation_json={
@@ -48,7 +48,7 @@ def _seed(db):
             'subject': {'reference': f'Patient/{PATIENT_1}'},
         },
     ))
-    db.session.add(InboundObservation(
+    db.session.add(CdrDeliveryLog(
         service_request_guid=SR_B, patient_guid=PATIENT_2,
         provider_org_guid=PROV_ORG, contract_guid=CONTRACT_B,
         fhir_observation_json={
@@ -350,7 +350,7 @@ class TestAdminReadAudit:
 class TestCdrProxyBehaviour:
     """Phase 3 SSOT cutover (ticket #282). Gateway now proxies the
     analyse-pull through to cdr1 via AnalyseClient.search_observations
-    instead of reading InboundObservation locally. Verifies the proxy
+    instead of reading CdrDeliveryLog locally. Verifies the proxy
     contract: SR pre-filter, cdr1-down fallback, spärr post-filter,
     audit is still written gateway-side.
     """
@@ -401,7 +401,7 @@ class TestCdrProxyBehaviour:
         assert len(rows) == 1
         snap = rows[0].payload_snapshot or {}
         # patient_guids should be sourced from the FHIR Bundle's
-        # subject.reference, not from InboundObservation.
+        # subject.reference, not from CdrDeliveryLog.
         assert snap.get('patient_guids') == [PATIENT_1]
 
     def test_blocked_patient_filtered_post_cdr(self, client, db):

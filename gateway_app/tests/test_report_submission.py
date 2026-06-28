@@ -665,7 +665,7 @@ class TestFeedAuth:
 
 class TestDedupAfterInboundDeleted:
     """Phase 1 SSOT cutover (ticket #280): the dedup queries query
-    CdrDeliveryLog, not InboundObservation. Verify dedup survives
+    CdrDeliveryLog, not CdrDeliveryLog. Verify dedup survives
     deletion of the source InboundObservation row — that's the future
     state phase 5 will introduce. Until phase 5 the row stays, so this
     test simulates the future state manually.
@@ -708,7 +708,6 @@ class TestDedupAfterInboundDeleted:
                 service_request_guid=sr).first()
             assert log is not None
             assert log.payload_hash is not None
-            assert log.inbound_observation_guid is None  # #296: never set
             assert log.fhir_observation_json is not None
 
         with patches[0], patches[1], patches[2], patches[3]:
@@ -762,7 +761,6 @@ class TestReceiptLookupSources:
         sr = 'sr-receipt-local-1'
         with app.app_context():
             db.session.add(CdrDeliveryLog(
-                inbound_observation_guid=None,
                 patient_guid='pat-r1',
                 service_request_guid=sr,
                 payload_hash='hash-1',

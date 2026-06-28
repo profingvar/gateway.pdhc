@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import requests as http_requests
 from flask import current_app
 
-from ..models import GuidResolutionCache, InboundObservation
+from ..models import GuidResolutionCache, CdrDeliveryLog
 from ..extensions import db
 
 logger = logging.getLogger(__name__)
@@ -176,11 +176,14 @@ class ContractScopeService:
                 if obs.get('concept_guid')
             }
             if service_request_guid:
+                # #298: queries CdrDeliveryLog instead of
+                # InboundObservation (which #299 drops). Same shape —
+                # both tables have service_request_guid + concept_guid.
                 prior = (
-                    InboundObservation.query
-                    .with_entities(InboundObservation.concept_guid)
-                    .filter(InboundObservation.service_request_guid == service_request_guid)
-                    .filter(InboundObservation.concept_guid.isnot(None))
+                    CdrDeliveryLog.query
+                    .with_entities(CdrDeliveryLog.concept_guid)
+                    .filter(CdrDeliveryLog.service_request_guid == service_request_guid)
+                    .filter(CdrDeliveryLog.concept_guid.isnot(None))
                     .distinct()
                     .all()
                 )

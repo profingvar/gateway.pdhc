@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from app.models import InboundObservation, ServiceRequestStatus
+from app.models import ServiceRequestStatus, CdrDeliveryLog
 from app.services import ips_client as ips_mod
 from app.services.ips_client import Block
 
@@ -29,7 +29,7 @@ def _seed(db):
         service_request_guid=SR, patient_guid=PATIENT,
         provider_org_guid=PROV_A, contract_guid=CONTRACT,
     ))
-    db.session.add(InboundObservation(
+    db.session.add(CdrDeliveryLog(
         service_request_guid=SR, patient_guid=PATIENT,
         provider_org_guid=PROV_A, contract_guid=CONTRACT,
         concept_guid="c-glucose",
@@ -39,7 +39,7 @@ def _seed(db):
             'recorded_at': '2026-05-15T10:00:00+00:00',
         },
     ))
-    db.session.add(InboundObservation(
+    db.session.add(CdrDeliveryLog(
         service_request_guid=SR, patient_guid=PATIENT,
         provider_org_guid=PROV_B, contract_guid=CONTRACT,
         concept_guid="c-glucose",
@@ -86,10 +86,10 @@ def _block(scope_id, *, lift_kind=None, lift_concepts=None,
 
 # Phase 3 SSOT (#282): gateway proxies analyse-pull to cdr1. Mock the
 # proxy call so the spärr-filter assertions still exercise the
-# filtering logic — they no longer hit InboundObservation directly.
+# filtering logic — they no longer hit CdrDeliveryLog directly.
 def _cdr_search(service_request_guids, *, patient=None, request_id=''):
     """Return the same FHIR Observation entries gateway would have
-    built from the seeded InboundObservation rows."""
+    built from the seeded CdrDeliveryLog rows."""
     entries = []
     if SR in service_request_guids:
         for obs_id, prov in [('obs-A', PROV_A), ('obs-B', PROV_B)]:

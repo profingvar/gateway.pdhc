@@ -169,19 +169,21 @@ class TestObligatoryAcrossPriorSubmissions:
         )
 
     def _store_prior(self, app, sr_guid, concept_guids):
+        # #298: cross-SR aggregation queries CdrDeliveryLog (not the
+        # now-removed InboundObservation table).
         from app.extensions import db
-        from app.models import InboundObservation
+        from app.models import CdrDeliveryLog
         with app.app_context():
             for c in concept_guids:
-                db.session.add(InboundObservation(
-                    service_request_guid=sr_guid,
+                db.session.add(CdrDeliveryLog(
                     patient_guid='pt-1',
-                    provider_org_guid='org-1',
-                    contract_guid='contract-aaa',
+                    service_request_guid=sr_guid,
                     concept_guid=c,
-                    fhir_observation_json={'concept_guid': c},
+                    contract_guid='contract-aaa',
+                    provider_org_guid='org-1',
                     payload_hash='prior-' + c,
-                    validation_status='valid',
+                    fhir_observation_json={'concept_guid': c},
+                    status='skipped',
                 ))
             db.session.commit()
 

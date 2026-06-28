@@ -13,7 +13,7 @@ Completion logic:
 """
 import logging
 from datetime import datetime, timezone
-from ..models import ServiceRequestStatus, InboundObservation
+from ..models import ServiceRequestStatus, CdrDeliveryLog
 from ..extensions import db
 
 logger = logging.getLogger(__name__)
@@ -63,11 +63,13 @@ class RequestCompletionService:
 
         # Count distinct transaction GUIDs delivered for this SR
         if transaction_guids:
+            # #298: distinct-transaction count moves to CdrDeliveryLog
+            # (the only ingest queue since #296).
             existing_txns = db.session.query(
-                db.func.count(db.distinct(InboundObservation.transaction_guid))
+                db.func.count(db.distinct(CdrDeliveryLog.transaction_guid))
             ).filter(
-                InboundObservation.service_request_guid == service_request_guid,
-                InboundObservation.transaction_guid.isnot(None),
+                CdrDeliveryLog.service_request_guid == service_request_guid,
+                CdrDeliveryLog.transaction_guid.isnot(None),
             ).scalar() or 0
             srs.delivered_transactions = existing_txns
 

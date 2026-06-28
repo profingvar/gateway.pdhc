@@ -36,7 +36,7 @@ body are cross-checked against the derived values if present.
 import logging
 from datetime import datetime, timezone
 from flask import g, current_app, request as flask_request
-from ..models import InboundObservation, AuditLog, CdrDeliveryLog
+from ..models import AuditLog, CdrDeliveryLog
 from ..extensions import db
 from ..errors import APIError
 from .grant_validation import GrantValidationService
@@ -301,7 +301,7 @@ class ReportIngestionService:
         # prefers the (still-existing) inbound guid for backwards
         # compatibility; falls back to the log guid once phase 5
         # nulls the FK.
-        payload_hash = InboundObservation.hash_payload(report_payload)
+        payload_hash = CdrDeliveryLog.hash_payload(report_payload)
         existing = CdrDeliveryLog.query.filter_by(
             service_request_guid=service_request_guid,
             payload_hash=payload_hash,
@@ -309,8 +309,7 @@ class ReportIngestionService:
         if existing:
             return {
                 'status': 'accepted',
-                'receipt_guid': (existing.inbound_observation_guid
-                                 or existing.guid),
+                'receipt_guid': existing.guid,
                 'service_request_guid': service_request_guid,
                 'action': 'duplicate_ignored',
             }
@@ -326,7 +325,7 @@ class ReportIngestionService:
         seen_in_batch = set()
         if observations:
             for idx, obs in enumerate(observations):
-                dedup_key = InboundObservation.compute_dedup_key(
+                dedup_key = CdrDeliveryLog.compute_dedup_key(
                     patient_guid,
                     obs.get('transaction_guid'),
                     obs.get('recorded_at'),
@@ -353,8 +352,7 @@ class ReportIngestionService:
                             'observation_index': idx,
                             'transaction_guid': obs.get('transaction_guid'),
                             'reason': 'duplicate_prior_submission',
-                            'receipt_guid': (prior.inbound_observation_guid
-                                             or prior.guid),
+                            'receipt_guid': prior.guid,
                         })
                         continue
                 # #296: CdrDeliveryLog written directly. No
@@ -472,7 +470,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
     """
     # QR endpoint dedup — same as Step 8 in the main path, queries
     # CdrDeliveryLog (phase 1 SSOT cutover).
-    payload_hash = InboundObservation.hash_payload(report_payload)
+    payload_hash = CdrDeliveryLog.hash_payload(report_payload)
     existing = CdrDeliveryLog.query.filter_by(
         service_request_guid=sr_guid,
         payload_hash=payload_hash,
@@ -480,8 +478,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
     if existing:
         return {
             'status': 'accepted',
-            'receipt_guid': (existing.inbound_observation_guid
-                             or existing.guid),
+            'receipt_guid': existing.guid,
             'service_request_guid': sr_guid,
             'action': 'duplicate_ignored',
         }

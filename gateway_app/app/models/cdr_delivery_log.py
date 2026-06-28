@@ -1,3 +1,5 @@
+import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 from ..extensions import db
@@ -22,13 +24,6 @@ class CdrDeliveryLog(db.Model):
     guid = db.Column(db.String(36), primary_key=True,
                     default=lambda: str(uuid.uuid4()))
 
-    inbound_observation_guid = db.Column(
-        db.String(36),
-        db.ForeignKey('inbound_observations.guid', ondelete='SET NULL'),
-        nullable=True,
-        unique=True,
-        index=True,
-    )
     patient_guid = db.Column(db.String(36), nullable=False, index=True)
 
     # Denormalised dedup + traceability columns — populated by the
@@ -64,7 +59,23 @@ class CdrDeliveryLog(db.Model):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    inbound_observation = db.relationship(
-        'InboundObservation',
-        backref=db.backref('cdr_delivery', uselist=False),
-    )
+    @staticmethod
+    def hash_payload(payload):
+        """SHA-256 of a sorted-keys JSON serialisation. Used as the
+        batch-level dedup index by report_ingestion. Moved here from
+        InboundObservation in #299 (SSOT phase 6 closure)."""
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
+
+    @staticmethod
+    def compute_dedup_key(patient_guid, transaction_guid, recorded_at):
+        """Per-observation idempotency key —
+        sha256(patient|transaction|recorded_at). None when recorded_at
+        is missing (no time-disambiguation possible). Moved here from
+        InboundObservation in #299."""
+        if not recorded_at:
+            return None
+        parts = '|'.join([patient_guid or '', transaction_guid or '',
+                          recorded_at])
+        return hashlib.sha256(parts.encode()).hexdigest()

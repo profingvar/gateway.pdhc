@@ -74,18 +74,14 @@ def _lookup(receipt_token):
     if local:
         return True, 'local'
 
-    # Also try receipt_token == inbound_observation_guid (the per-row
-    # receipt interpretation). The FK is nullable after phase 1's
-    # migration but is still set until phase 5 deletion runs.
-    local_by_inbound = (CdrDeliveryLog.query
-                        .filter_by(inbound_observation_guid=receipt_token)
-                        .first())
-    if local_by_inbound:
-        return True, 'local'
+    # The legacy per-row receipt_token interpretation
+    # (filter_by(inbound_observation_guid=receipt_token)) was removed
+    # in #299 when the inbound_observation_guid column went away.
+    # Receipts are now always the SR guid (handled above) or a
+    # cdr1-side lookup (handled below).
 
-    # 2. Fallback to cdr1 — the inbound row may have been deleted in
-    # phase 5; cdr1 still has ingest_raw indexed by source_system_id
-    # (== the original inbound_observation_guid).
+    # 2. Fallback to cdr1 — cdr1 indexes ingest_raw by
+    # source_system_id which equals the original log/inbound guid.
     base_url = (current_app.config.get('CDR_BASE_URL') or '').rstrip('/')
     service_key = current_app.config.get('GATEWAY_PDHC_SERVICE_KEY', '')
     if not base_url or not service_key:

@@ -17,7 +17,7 @@ Tests:
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
-from app.models import ServiceRequestStatus, InboundObservation
+from app.models import ServiceRequestStatus, CdrDeliveryLog
 from app.services.request_completion import RequestCompletionService
 
 
@@ -47,15 +47,13 @@ class TestRequestCompletion:
     def test_completed_when_all_delivered(self, db):
         # Create observations with distinct transaction GUIDs
         for txn in ['txn-a', 'txn-b', 'txn-c']:
-            obs = InboundObservation(
+            obs = CdrDeliveryLog(
                 service_request_guid='sr-003',
                 transaction_guid=txn,
                 patient_guid='pat-003',
                 provider_org_guid='org-003',
                 contract_guid='con-003',
                 fhir_observation_json={'value': 1},
-                validation_status='valid',
-                resolution_status='pending',
             )
             db.session.add(obs)
         db.session.commit()
@@ -85,15 +83,13 @@ class TestRequestCompletion:
     def test_partial_when_expired_with_deliveries(self, db):
         past = datetime.now(timezone.utc) - timedelta(hours=1)
         # Create an observation first
-        obs = InboundObservation(
+        obs = CdrDeliveryLog(
             service_request_guid='sr-005',
             transaction_guid='txn-x',
             patient_guid='pat-005',
             provider_org_guid='org-005',
             contract_guid='con-005',
             fhir_observation_json={'value': 1},
-            validation_status='valid',
-            resolution_status='pending',
         )
         db.session.add(obs)
         db.session.commit()

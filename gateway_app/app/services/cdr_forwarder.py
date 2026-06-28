@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from flask import current_app
 from sqlalchemy import text
 from ..extensions import db
-from ..models import CdrDeliveryLog, InboundObservation, AuditLog
+from ..models import CdrDeliveryLog, AuditLog
 from .cdr_client import CdrClient, CdrRejected, CdrUnavailable
 from .fhir_observation_builder import build_fhir_observation
 
