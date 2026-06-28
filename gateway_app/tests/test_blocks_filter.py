@@ -113,7 +113,7 @@ def _cdr_search(service_request_guids, *, patient=None, request_id=''):
 
 def _patch_cdr():
     return patch(
-        'app.api.observations.CdrClient.search_observations',
+        'app.api.observations.AnalyseClient.search_observations',
         side_effect=_cdr_search,
     )
 

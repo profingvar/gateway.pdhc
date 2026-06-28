@@ -68,7 +68,19 @@ class Config:
     # cdr1 expects X-Source-Service: gateway.pdhc + X-Service-Key. This
     # key MUST match cdr.pdhc/cdr_app/app/api/auth.py's
     # GATEWAY_PDHC_SERVICE_KEY config — operator copies it across.
+    # Since #291 the same key value also authenticates the analyse-pull
+    # call (gateway → dashboard.pdhc), so the operator must propagate
+    # it to dashboard.pdhc's .env too.
     GATEWAY_PDHC_SERVICE_KEY = os.environ.get('GATEWAY_PDHC_SERVICE_KEY', '')
+
+    # Analyse layer (dashboard.pdhc) — gateway's /api/v1/observations
+    # search now proxies here (was cdr1 in #282). Federated cohort
+    # reads across CDR1–6 are analyse's job; cdr1 only owns per-point
+    # storage.
+    ANALYSE_BASE_URL = os.environ.get(
+        'ANALYSE_BASE_URL', 'http://host.docker.internal:9027')
+    ANALYSE_TIMEOUT_SECONDS = int(
+        os.environ.get('ANALYSE_TIMEOUT_SECONDS', '30'))
 
 
 class TestConfig(Config):

@@ -88,7 +88,7 @@ def _patch_parties():
 
 # Phase 3 SSOT (#282): gateway proxies analyse-pull to cdr1. The audit
 # tests only care about audit shape; the bundle they would have
-# observed must come back through the mocked CdrClient.
+# observed must come back through the mocked AnalyseClient.
 def _cdr_search(service_request_guids, *, patient=None, request_id=''):
     sr_to_patients = {SR_A: [PATIENT_1, PATIENT_3], SR_C: [PATIENT_2]}
     entries = []
@@ -110,7 +110,7 @@ def _cdr_search(service_request_guids, *, patient=None, request_id=''):
 
 def _patch_cdr():
     return patch(
-        'app.api.observations.CdrClient.search_observations',
+        'app.api.observations.AnalyseClient.search_observations',
         side_effect=_cdr_search,
     )
 
