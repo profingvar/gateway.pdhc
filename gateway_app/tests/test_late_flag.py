@@ -58,7 +58,7 @@ def _make_sr_context_mock(status='active', period_end=None):
             'status': status,
             'patient_guid': 'patient-222',
             'contract_guid': 'contract-bbb',
-            'requester_org_guid': 'org-requester',
+            'requesting_org_guid': 'org-requester',
             'period_start': None,
             'period_end': period_end,
             'transactions': [

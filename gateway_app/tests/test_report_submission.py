@@ -72,7 +72,7 @@ def _mock_sr_context(*args, **kwargs):
         'status': 'active',
         'patient_guid': 'patient-222',
         'contract_guid': 'contract-bbb',
-        'requester_org_guid': 'org-requester',
+        'requesting_org_guid': 'org-requester',
         'transactions': [
             {
                 'transaction_guid': 'tx-001',
@@ -194,7 +194,9 @@ def _make_minimal_body():
 
 
 def _make_backward_compat_body():
-    """Full payload with org_guid + contract_guid (backward compatible)."""
+    """Full payload with the LEGACY `organisation_guid` wire alias
+    (canonical key is `provider_org_guid`; old providers still send
+    the old name and the gateway accepts both — #294 / #301)."""
     body = _make_minimal_body()
     body['organisation_guid'] = 'org-aaa'
     body['contract_guid'] = 'contract-bbb'
@@ -357,8 +359,26 @@ class TestPerObservationIdempotency:
 class TestOrgCrossCheck:
 
     def test_wrong_org_in_body(self, client, app, db):
+        # Uses LEGACY wire alias `organisation_guid` to exercise the
+        # back-compat read path; production callers should send
+        # `provider_org_guid` (#294 / #301).
         body = _make_minimal_body()
         body['organisation_guid'] = 'wrong-org'
+        patches = _patch_all_upstreams()
+        with patches[0], patches[1], patches[2], patches[3]:
+            resp = client.post(
+                '/api/v1/provider/report/sr-111',
+                json=body,
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        assert resp.status_code == 403
+        assert resp.get_json()['code'] == 'ORG_MISMATCH'
+
+    def test_wrong_org_in_body_canonical_key(self, client, app, db):
+        # #294 / #301: same cross-check via the canonical wire key
+        # `provider_org_guid`.
+        body = _make_minimal_body()
+        body['provider_org_guid'] = 'wrong-org'
         patches = _patch_all_upstreams()
         with patches[0], patches[1], patches[2], patches[3]:
             resp = client.post(

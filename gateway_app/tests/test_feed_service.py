@@ -43,7 +43,7 @@ MOCK_BUNDLE = {
     'grant_token': 'hmac-grant-abc',
     'patient_guid': 'patient-222',
     'contract_guid': 'contract-333',
-    'organisation_guid': 'org-111',
+    'provider_org_guid': 'org-111',
     'expires_at': '2026-03-29T07:00:00Z',
 }
 

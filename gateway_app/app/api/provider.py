@@ -23,7 +23,8 @@ def submit_report(service_request_guid):
     Validation chain (Phase G of the provider integration guide):
     1. PAT validated (by decorator) → 401 UNAUTHORIZED
     2. PAT has 'write' scope (by decorator) → 403 FORBIDDEN
-    3. PAT org matches body.organisation_guid (cross-check) → 403
+    3. PAT org matches body.provider_org_guid (cross-check; legacy
+       alias `organisation_guid` still accepted as wire input) → 403
     4. Grant token HMAC matches → 403 GRANT_TOKEN_INVALID
     5. Grant token not expired → 403 GRANT_EXPIRED
     6. body.patient_guid matches SR.patient_guid → 403 PATIENT_MISMATCH

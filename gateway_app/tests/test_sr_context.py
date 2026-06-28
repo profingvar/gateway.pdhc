@@ -13,7 +13,7 @@ def _mock_context_response(status_code=200, data=None):
             'status': 'active',
             'patient_guid': 'patient-bbb',
             'contract_guid': 'contract-ccc',
-            'requester_org_guid': 'org-ddd',
+            'requesting_org_guid': 'org-ddd',
             'transactions': [
                 {
                     'transaction_guid': 'tx-001',

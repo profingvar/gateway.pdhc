@@ -28,14 +28,15 @@ class GrantValidationService:
     """Validates grant tokens by delegating to request.pdhc internal API."""
 
     @staticmethod
-    def validate(service_request_guid, patient_guid, organisation_guid,
+    def validate(service_request_guid, patient_guid, provider_org_guid,
                  grant_token, expires_at_iso=None):
         """Validate the composite key via request.pdhc.
 
         Args:
             service_request_guid: The ServiceRequest GUID
             patient_guid: The patient GUID
-            organisation_guid: The provider organisation GUID
+            provider_org_guid: The provider organisation GUID (canonical
+                name; previously `organisation_guid`, renamed #294/#301).
             grant_token: The grant token to verify
             expires_at_iso: Optional (ignored — request.pdhc checks expiry)
 
@@ -48,8 +49,8 @@ class GrantValidationService:
             missing.append('service_request_guid')
         if not patient_guid:
             missing.append('patient_guid')
-        if not organisation_guid:
-            missing.append('organisation_guid')
+        if not provider_org_guid:
+            missing.append('provider_org_guid')
         if not grant_token:
             missing.append('grant_token')
 
@@ -82,7 +83,10 @@ class GrantValidationService:
                 json={
                     'sr_guid': service_request_guid,
                     'patient_guid': patient_guid,
-                    'org_guid': organisation_guid,
+                    # request.pdhc internal /grant/validate accepts
+                    # `org_guid` on the wire. Wire rename tracked in
+                    # #306 (contract + request API field-name sweep).
+                    'org_guid': provider_org_guid,
                     'grant_token': grant_token,
                 },
                 timeout=10,

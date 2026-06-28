@@ -30,8 +30,11 @@ Clients SHOULD NOT send concept_guid, unit, ranges — gateway overwrites
 them from the SR context so a compromised provider cannot tag
 observations against concepts the contract doesn't permit.
 
-Backward compatible: patient_guid/organisation_guid/contract_guid in
-body are cross-checked against the derived values if present.
+Backward compatible: patient_guid/provider_org_guid/contract_guid in
+body are cross-checked against the derived values if present. The
+legacy wire-format alias `organisation_guid` is still accepted as a
+back-compat read; canonical `provider_org_guid` wins when both are
+sent (#294 RFC plan §4 / #301).
 """
 import logging
 from datetime import datetime, timezone
@@ -65,19 +68,22 @@ class ReportIngestionService:
         status = body.get('status', 'in-progress')
         report_payload = body.get('report_payload')
 
-        # Backward compat: accept patient/org/contract from body for cross-check
+        # Backward compat: accept patient/org/contract from body for cross-check.
+        # #294/#301: canonical wire key is `provider_org_guid`; legacy
+        # `organisation_guid` still accepted as a back-compat read.
         body_patient_guid = body.get('patient_guid')
-        body_org_guid = body.get('organisation_guid')
+        body_org_guid = (body.get('provider_org_guid')
+                         or body.get('organisation_guid'))
         body_contract_guid = body.get('contract_guid')
         expires_at = body.get('expires_at')  # ignored — request.pdhc checks expiry
 
         # Derive org_guid from PAT (never from body)
-        organisation_guid = g.provider_org_guid
+        provider_org_guid = g.provider_org_guid
 
         # ── Step 2: Cross-check body org if provided ────────────────
-        if body_org_guid and body_org_guid != organisation_guid:
+        if body_org_guid and body_org_guid != provider_org_guid:
             _audit_rejection(service_request_guid, body_patient_guid,
-                             organisation_guid, body_contract_guid,
+                             provider_org_guid, body_contract_guid,
                              'org_mismatch', body_org_guid)
             raise APIError(
                 'Organisation GUID does not match authenticated provider',
@@ -91,7 +97,7 @@ class ReportIngestionService:
         sr_context = SRContextService.fetch(service_request_guid)
         if not sr_context.found:
             _audit_rejection(service_request_guid, body_patient_guid,
-                             organisation_guid, None,
+                             provider_org_guid, None,
                              'SR_NOT_FOUND', sr_context.error)
             raise APIError(
                 'ServiceRequest not found',
@@ -101,7 +107,7 @@ class ReportIngestionService:
         patient_guid = sr_context.patient_guid
         if not patient_guid:
             _audit_rejection(service_request_guid, body_patient_guid,
-                             organisation_guid, None,
+                             provider_org_guid, None,
                              'SR_INCOMPLETE', 'SR has no patient_guid')
             raise APIError(
                 'ServiceRequest is missing patient_guid',
@@ -111,7 +117,7 @@ class ReportIngestionService:
         # Cross-check body patient_guid if the client still sends it
         if body_patient_guid and body_patient_guid != patient_guid:
             _audit_rejection(service_request_guid, body_patient_guid,
-                             organisation_guid, None,
+                             provider_org_guid, None,
                              'PATIENT_MISMATCH', body_patient_guid)
             raise APIError(
                 'Patient GUID does not match ServiceRequest',
@@ -121,11 +127,11 @@ class ReportIngestionService:
         # ── Step 4: Validate grant via request.pdhc ─────────────────
         grant_result = GrantValidationService.validate(
             service_request_guid, patient_guid,
-            organisation_guid, grant_token,
+            provider_org_guid, grant_token,
         )
         if not grant_result.valid:
             _audit_rejection(service_request_guid, patient_guid,
-                             organisation_guid, None,
+                             provider_org_guid, None,
                              grant_result.error_code, grant_result.error)
             status_code = 400 if grant_result.error_code == 'COMPOSITE_KEY_INCOMPLETE' else 403
             raise APIError(
@@ -140,7 +146,7 @@ class ReportIngestionService:
         # Cross-check body contract_guid if provided
         if body_contract_guid and body_contract_guid != contract_guid:
             _audit_rejection(service_request_guid, patient_guid,
-                             organisation_guid, contract_guid,
+                             provider_org_guid, contract_guid,
                              'contract_mismatch', body_contract_guid)
             raise APIError(
                 'Contract GUID does not match grant',
@@ -159,7 +165,7 @@ class ReportIngestionService:
         # ── Step 5a: FHIR QuestionnaireResponse — store directly ────
         if isinstance(report_payload, dict) and report_payload.get('resourceType') == 'QuestionnaireResponse':
             return _store_questionnaire_response(
-                service_request_guid, patient_guid, organisation_guid,
+                service_request_guid, patient_guid, provider_org_guid,
                 contract_guid, grant_token, report_payload, status,
                 is_late=is_late,
             )
@@ -246,7 +252,7 @@ class ReportIngestionService:
                 validation = ObservationValidator.validate_observations(obs_list)
                 if not validation.valid:
                     _audit_rejection(service_request_guid, patient_guid,
-                                     organisation_guid, contract_guid,
+                                     provider_org_guid, contract_guid,
                                      'VALIDATION_ERROR', validation.errors)
                     raise APIError(
                         'Observation validation failed',
@@ -258,7 +264,7 @@ class ReportIngestionService:
 
         if not report_payload:
             _audit_rejection(service_request_guid, patient_guid,
-                             organisation_guid, contract_guid,
+                             provider_org_guid, contract_guid,
                              'VALIDATION_ERROR', 'report_payload is required')
             raise APIError(
                 'report_payload is required',
@@ -275,7 +281,7 @@ class ReportIngestionService:
             )
             if not scope_ok:
                 _audit_rejection(service_request_guid, patient_guid,
-                                 organisation_guid, contract_guid,
+                                 provider_org_guid, contract_guid,
                                  'SCOPE_VIOLATION', scope_errors)
                 raise APIError(
                     'Observations violate contract scope',
@@ -285,7 +291,7 @@ class ReportIngestionService:
                 )
         elif not scope_result.valid and scope_result.error_code == 'CONTRACT_INACTIVE':
             _audit_rejection(service_request_guid, patient_guid,
-                             organisation_guid, contract_guid,
+                             provider_org_guid, contract_guid,
                              'CONTRACT_INACTIVE', scope_result.error)
             raise APIError(
                 scope_result.error,
@@ -365,7 +371,7 @@ class ReportIngestionService:
                     transaction_guid=obs.get('transaction_guid'),
                     concept_guid=obs.get('concept_guid'),
                     contract_guid=contract_guid,
-                    provider_org_guid=organisation_guid,
+                    provider_org_guid=provider_org_guid,
                     payload_hash=payload_hash,
                     dedup_key=dedup_key,
                     received_at=datetime.now(timezone.utc),
@@ -384,7 +390,7 @@ class ReportIngestionService:
                 patient_guid=patient_guid,
                 service_request_guid=service_request_guid,
                 contract_guid=contract_guid,
-                provider_org_guid=organisation_guid,
+                provider_org_guid=provider_org_guid,
                 payload_hash=payload_hash,
                 received_at=datetime.now(timezone.utc),
                 fhir_observation_json=report_payload,
@@ -397,7 +403,7 @@ class ReportIngestionService:
         # ── Step 10: Audit ──────────────────────────────────────────
         audit = AuditLog(
             event_type='report.received',
-            actor_guid=organisation_guid,
+            actor_guid=provider_org_guid,
             data_subject_guid=patient_guid,
             resource_guid=service_request_guid,
             ip_address=flask_request.remote_addr,
@@ -420,7 +426,7 @@ class ReportIngestionService:
 
         # Send acceptance receipt to provider (fire-and-forget)
         _send_receipt(service_request_guid, patient_guid,
-                      organisation_guid, contract_guid,
+                      provider_org_guid, contract_guid,
                       accepted=True,
                       observations_stored=len(stored),
                       payload_hash=payload_hash,
@@ -428,7 +434,7 @@ class ReportIngestionService:
 
         # Track delivery for request completion (tillägg 7)
         _track_delivery(service_request_guid, patient_guid,
-                         organisation_guid, contract_guid,
+                         provider_org_guid, contract_guid,
                          len(stored), expires_at, observations)
 
         # All-stored → action=created; all-ignored → duplicate_ignored

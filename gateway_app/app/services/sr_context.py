@@ -35,8 +35,13 @@ class SRContextResult:
         return self._data.get('contract_guid', '')
 
     @property
-    def requester_org_guid(self):
-        return self._data.get('requester_org_guid', '')
+    def requesting_org_guid(self):
+        # #294 RFC plan §4 / #301 (2026-06-28): canonical name is
+        # `requesting_org_guid`. request.pdhc still emits the legacy
+        # `requester_org_guid` on the wire; accept both, prefer canonical.
+        # request.pdhc switch lives in #306.
+        return (self._data.get('requesting_org_guid')
+                or self._data.get('requester_org_guid', ''))
 
     @property
     def status(self):
