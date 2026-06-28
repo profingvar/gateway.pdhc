@@ -93,7 +93,7 @@ _SR_TO_OBS = {
 
 
 def _cdr_search(service_request_guids, *, patient=None, request_id=''):
-    """Stand-in for CdrClient.search_observations. Filters _SR_TO_OBS
+    """Stand-in for AnalyseClient.search_observations. Filters _SR_TO_OBS
     by the requested SR set."""
     entries = [
         {'resource': _SR_TO_OBS[sr]} for sr in service_request_guids
@@ -108,7 +108,7 @@ def _cdr_search(service_request_guids, *, patient=None, request_id=''):
 
 def _patch_cdr():
     return patch(
-        'app.api.observations.CdrClient.search_observations',
+        'app.api.observations.AnalyseClient.search_observations',
         side_effect=_cdr_search,
     )
 
@@ -349,7 +349,7 @@ class TestAdminReadAudit:
 
 class TestCdrProxyBehaviour:
     """Phase 3 SSOT cutover (ticket #282). Gateway now proxies the
-    analyse-pull through to cdr1 via CdrClient.search_observations
+    analyse-pull through to cdr1 via AnalyseClient.search_observations
     instead of reading InboundObservation locally. Verifies the proxy
     contract: SR pre-filter, cdr1-down fallback, spärr post-filter,
     audit is still written gateway-side.
@@ -364,7 +364,7 @@ class TestCdrProxyBehaviour:
                                request_id=request_id)
         with patch('app.api.observations.validate_sso_token',
                    return_value=_blob([ORG_A])), _patch_parties(), \
-             patch('app.api.observations.CdrClient.search_observations',
+             patch('app.api.observations.AnalyseClient.search_observations',
                    side_effect=_capture):
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
@@ -375,18 +375,18 @@ class TestCdrProxyBehaviour:
             f"gateway must pre-filter SRs to cdr1; got {captured['srs']}"
 
     def test_cdr_unavailable_returns_502(self, client, db):
-        from app.services.cdr_client import CdrUnavailable
+        from app.services.analyse_client import AnalyseUnavailable
         _seed(db)
         with patch('app.api.observations.validate_sso_token',
                    return_value=_blob([ORG_A])), _patch_parties(), \
-             patch('app.api.observations.CdrClient.search_observations',
-                   side_effect=CdrUnavailable('connect refused')):
+             patch('app.api.observations.AnalyseClient.search_observations',
+                   side_effect=AnalyseUnavailable('connect refused')):
             r = client.get(
                 f'/api/v1/observations?organization={ORG_A}',
                 headers={'Authorization': 'Bearer t'},
             )
         assert r.status_code == 502
-        assert 'cdr1' in r.get_json()['error'].lower()
+        assert 'analyse' in r.get_json()['error'].lower()
 
     def test_audit_still_written_on_proxy_path(self, client, db):
         from app.models import AuditLog

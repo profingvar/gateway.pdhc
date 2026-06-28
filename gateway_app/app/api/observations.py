@@ -2,10 +2,11 @@
 
 GET /api/v1/observations?organization=<org_guid>
 
-Phase 3 of the cdr1 SSOT cutover (ticket #282;
-docs/cdr1_ssot_cutover_plan.md §7). This endpoint used to read from
-gateway's own ``inbound_observations`` table; it now PROXIES to cdr1
-(Option A). Gateway keeps:
+Phase 3 of the cdr1 SSOT cutover (ticket #282) plus phase 5 of the
+cdr1-analyse split (ticket #291). The endpoint used to read from
+gateway's own ``inbound_observations`` table; #282 PROXIES it to cdr1
+(Option A); #291 re-points the proxy at the analyse layer
+(dashboard.pdhc). Gateway keeps:
 
   - SSO bearer validation + analyse-phase gate
   - Org-membership check (admin bypass with X-Admin-Justification)
@@ -17,11 +18,11 @@ gateway's own ``inbound_observations`` table; it now PROXIES to cdr1
 What gateway no longer does:
 
   - Reading from InboundObservation
-  - Assembling the FHIR R5 Observation resource — cdr1 returns
-    already-assembled resources from its FhirResource table (gateway
-    forwarded them there in the same shape via the cdr_forwarder).
+  - Assembling the FHIR R5 Observation resource — analyse returns
+    already-assembled resources federated from CDR1–6
+    (gateway forwarded them to cdr1 in that shape via cdr_forwarder).
 
-The bundle gateway returns is the bundle cdr1 returns, post-filtered
+The bundle gateway returns is the bundle analyse returns, post-filtered
 through the spärr check. Returned shape is identical to the
 pre-cutover bundle: FHIR R5 searchset Bundle of Observation resources.
 """
@@ -35,7 +36,9 @@ from ..models import ServiceRequestStatus, AuditLog
 from ..extensions import db
 from ..services.sso_service import validate_sso_token, has_analysis_access
 from ..services.contract_scope import ContractScopeService
-from ..services.cdr_client import CdrClient, CdrRejected, CdrUnavailable
+from ..services.analyse_client import (
+    AnalyseClient, AnalyseRejected, AnalyseUnavailable,
+)
 from ..services.ips_client import (
     Block,
     blocked_clinic_ids,
@@ -195,22 +198,24 @@ def list_observations():
         )
         return jsonify(_empty_bundle()), 200
 
-    # Proxy to cdr1. cdr1 trusts gateway's auth decision; we forward
-    # X-Source-Service: gateway.pdhc + X-Service-Key + the
-    # pre-computed SR filter.
+    # Proxy to the analyse layer (dashboard.pdhc since #291). Analyse
+    # trusts gateway's SSO + phase-gate + contract-scope decision; we
+    # forward X-Source-Service: gateway.pdhc + X-Service-Key + the
+    # pre-computed SR filter. Analyse federates over CDR1–6 and
+    # returns one merged Bundle.
     try:
-        bundle = CdrClient.search_observations(
+        bundle = AnalyseClient.search_observations(
             matching_srs,
             patient=None,
             request_id=correlation or 'observations.read',
         )
-    except CdrRejected as e:
-        logger.error("cdr1 rejected analyse-pull (%d): %s",
+    except AnalyseRejected as e:
+        logger.error("analyse rejected analyse-pull (%d): %s",
                      e.status_code, e.body[:200])
-        return jsonify({'error': 'cdr1 rejected the request'}), 502
-    except CdrUnavailable as e:
-        logger.error("cdr1 unavailable for analyse-pull: %s", e)
-        return jsonify({'error': 'cdr1 unavailable'}), 502
+        return jsonify({'error': 'analyse rejected the request'}), 502
+    except AnalyseUnavailable as e:
+        logger.error("analyse unavailable for analyse-pull: %s", e)
+        return jsonify({'error': 'analyse unavailable'}), 502
 
     entries = (bundle or {}).get('entry') or []
 
