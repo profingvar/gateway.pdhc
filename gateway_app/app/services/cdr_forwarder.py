@@ -113,24 +113,25 @@ def _deliver_one(log):
     log.attempt_count += 1
     log.last_attempt_at = now
 
-    obs_row = InboundObservation.query.filter_by(
-        guid=log.inbound_observation_guid).first()
-    if not obs_row:
-        _mark_failed_terminal(log, "InboundObservation row missing")
+    # #285/#296/#297: payload is built from the log row itself; the
+    # InboundObservation lookup is gone. fhir_observation_json is
+    # populated on the log row by report_ingestion (since #296).
+    if not log.fhir_observation_json:
+        _mark_failed_terminal(log, "Log row has no fhir_observation_json")
         return False
 
-    payload = _build_payload(obs_row)
+    payload = _build_payload(log)
 
     db.session.add(AuditLog(
         event_type='cdr.delivery.attempt',
         actor_guid='gateway.pdhc',
         data_subject_guid=log.patient_guid,
-        resource_guid=log.inbound_observation_guid,
+        resource_guid=log.guid,
         payload_snapshot={'attempt_count': log.attempt_count},
     ))
 
     try:
-        body = CdrClient.deliver_one(payload, request_id=log.inbound_observation_guid)
+        body = CdrClient.deliver_one(payload, request_id=log.guid)
     except CdrRejected as e:
         # 4xx from cdr1 — terminal, do not retry
         _mark_failed_terminal(log, f"cdr1 {e.status_code}: {e.body[:200]}")
@@ -138,7 +139,7 @@ def _deliver_one(log):
             event_type='cdr.delivery.failure',
             actor_guid='gateway.pdhc',
             data_subject_guid=log.patient_guid,
-            resource_guid=log.inbound_observation_guid,
+            resource_guid=log.guid,
             payload_snapshot={
                 'terminal': True,
                 'status_code': e.status_code,
@@ -165,42 +166,40 @@ def _deliver_one(log):
         event_type='cdr.delivery.success',
         actor_guid='gateway.pdhc',
         data_subject_guid=log.patient_guid,
-        resource_guid=log.inbound_observation_guid,
+        resource_guid=log.guid,
         payload_snapshot={
             'attempt_count': log.attempt_count,
             'cdr_resource_id': log.cdr_resource_id,
         },
     ))
 
-    # SSOT phase 5 (#284) — the InboundObservation row is no longer
-    # needed once cdr1 has accepted it. The dedup keys live on
-    # CdrDeliveryLog (#280), the receipt-service queries cdr1 (#281),
-    # the analyse-pull endpoint proxies to cdr1 (#282), and the admin
-    # UI is gone (#283). Deletion is gated by config so the cutover
-    # can be staged: deploy → run flask delete-already-delivered for
-    # the backlog → flip the flag.
-    if current_app.config.get('CDR_FORWARDING_DELETE_AFTER_DELIVERY'):
-        # The FK was relaxed to ON DELETE SET NULL in migration
-        # b5c6d7e8f9a0; deleting obs_row will null the log's
-        # inbound_observation_guid automatically.
-        db.session.delete(obs_row)
+    # #297: nothing to delete. The InboundObservation row never existed
+    # (since #296 the writer skipped it). The CDR_FORWARDING_DELETE_AFTER_DELIVERY
+    # config is now dead code; left in place + ignored. Will be removed
+    # together with the InboundObservation model in #299.
     return True
 
 
-def _build_payload(obs_row):
-    """Map an InboundObservation row to cdr1's ingest payload shape."""
-    fhir_obs = build_fhir_observation(obs_row, sr_contexts=None,
+def _build_payload(log_row):
+    """Map a CdrDeliveryLog row to cdr1's ingest payload shape.
+
+    Since #296/#297 the log row holds everything build_fhir_observation
+    needs (fhir_observation_json, patient_guid, service_request_guid,
+    transaction_guid, contract_guid, provider_org_guid, received_at,
+    concept_guid). No InboundObservation lookup required.
+    """
+    fhir_obs = build_fhir_observation(log_row, sr_contexts=None,
                                       contract_scopes=None)
     return {
-        'patient_guid': obs_row.patient_guid,
+        'patient_guid': log_row.patient_guid,
         'source_type': 'fhir',
-        'source_system_id': obs_row.guid,
+        'source_system_id': log_row.guid,
         'fhir_resource': fhir_obs,
         'clinical_context': {
-            'service_request_guid': obs_row.service_request_guid,
-            'transaction_guid': obs_row.transaction_guid,
-            'contract_guid': obs_row.contract_guid,
-            'provider_org_guid': obs_row.provider_org_guid,
+            'service_request_guid': log_row.service_request_guid,
+            'transaction_guid': log_row.transaction_guid,
+            'contract_guid': log_row.contract_guid,
+            'provider_org_guid': log_row.provider_org_guid,
         },
     }
 

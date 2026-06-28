@@ -357,64 +357,44 @@ class ReportIngestionService:
                                              or prior.guid),
                         })
                         continue
-                record = InboundObservation(
+                # #296: CdrDeliveryLog written directly. No
+                # InboundObservation row. cdr_delivery_log is the sole
+                # queue + dedup index + provenance source for the
+                # forwarder.
+                record = CdrDeliveryLog(
+                    patient_guid=patient_guid,
                     service_request_guid=service_request_guid,
                     transaction_guid=obs.get('transaction_guid'),
                     concept_guid=obs.get('concept_guid'),
-                    patient_guid=patient_guid,
-                    provider_org_guid=organisation_guid,
                     contract_guid=contract_guid,
-                    grant_token=grant_token,
-                    fhir_observation_json=obs,
-                    value=str(obs.get('value', '')),
-                    response_type=obs.get('response_type'),
+                    provider_org_guid=organisation_guid,
                     payload_hash=payload_hash,
                     dedup_key=dedup_key,
-                    validation_status='valid',
-                    resolution_status='resolved' if obs.get('concept_guid') else 'pending',
-                    is_late=is_late,
+                    received_at=datetime.now(timezone.utc),
+                    fhir_observation_json=obs,
+                    status=('pending' if obs.get('concept_guid') else 'skipped'),
                 )
                 db.session.add(record)
-                db.session.flush()  # populate record.guid for FK below
+                db.session.flush()
                 stored.append(record)
-                db.session.add(CdrDeliveryLog(
-                    inbound_observation_guid=record.guid,
-                    patient_guid=record.patient_guid,
-                    payload_hash=record.payload_hash,
-                    dedup_key=record.dedup_key,
-                    service_request_guid=record.service_request_guid,
-                    concept_guid=record.concept_guid,
-                    received_at=record.received_at,
-                    status=('pending' if record.resolution_status == 'resolved'
-                            else 'skipped'),
-                ))
         else:
-            # Manual/freeform mode — store whole payload as single record
-            record = InboundObservation(
-                service_request_guid=service_request_guid,
+            # Manual/freeform mode — #296: write CdrDeliveryLog
+            # directly, status='skipped' (no concept_guid → not
+            # forwardable). Still carries payload_hash so re-POST
+            # dedup works.
+            record = CdrDeliveryLog(
                 patient_guid=patient_guid,
-                provider_org_guid=organisation_guid,
+                service_request_guid=service_request_guid,
                 contract_guid=contract_guid,
-                grant_token=grant_token,
-                fhir_observation_json=report_payload,
+                provider_org_guid=organisation_guid,
                 payload_hash=payload_hash,
-                validation_status='valid',
-                resolution_status='pending',
-                is_late=is_late,
+                received_at=datetime.now(timezone.utc),
+                fhir_observation_json=report_payload,
+                status='skipped',
             )
             db.session.add(record)
-            db.session.flush()  # populate record.guid for FK below
+            db.session.flush()
             stored.append(record)
-            # No concept_guid → not forwardable. Log as skipped, but
-            # still carry payload_hash so re-POST dedup works.
-            db.session.add(CdrDeliveryLog(
-                inbound_observation_guid=record.guid,
-                patient_guid=record.patient_guid,
-                payload_hash=record.payload_hash,
-                service_request_guid=record.service_request_guid,
-                received_at=record.received_at,
-                status='skipped',
-            ))
 
         # ── Step 10: Audit ──────────────────────────────────────────
         audit = AuditLog(
@@ -506,21 +486,21 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
             'action': 'duplicate_ignored',
         }
 
-    # Parent record: full QR resource for reference
-    parent = InboundObservation(
-        service_request_guid=sr_guid,
+    # #296: parent QR record as a CdrDeliveryLog (status='skipped' —
+    # the whole QR resource is too coarse to forward directly; the
+    # individual items become forwardable children).
+    parent = CdrDeliveryLog(
         patient_guid=patient_guid,
-        provider_org_guid=org_guid,
+        service_request_guid=sr_guid,
         contract_guid=contract_guid,
-        grant_token=grant_token,
-        fhir_observation_json=report_payload,
-        response_type='QuestionnaireResponse',
+        provider_org_guid=org_guid,
         payload_hash=payload_hash,
-        validation_status='valid',
-        resolution_status='resolved',
-        is_late=is_late,
+        received_at=datetime.now(timezone.utc),
+        fhir_observation_json=report_payload,
+        status='skipped',
     )
     db.session.add(parent)
+    db.session.flush()  # populate parent.guid for child back-references
 
     # Extract individual items as child observations
     items = report_payload.get('item', [])
@@ -541,14 +521,19 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
             if value is None:
                 continue
 
-            child = InboundObservation(
+            # #296: each child is a CdrDeliveryLog. parent_guid is now
+            # the parent log's guid (was InboundObservation.guid).
+            # status='pending' when concept_code is present (real
+            # concept), 'skipped' when only linkId fallback (cdr1's
+            # transformer needs a real concept_guid).
+            child = CdrDeliveryLog(
+                patient_guid=patient_guid,
                 service_request_guid=sr_guid,
                 transaction_guid=link_id,
                 concept_guid=concept_code or link_id,
-                patient_guid=patient_guid,
-                provider_org_guid=org_guid,
                 contract_guid=contract_guid,
-                grant_token=grant_token,
+                provider_org_guid=org_guid,
+                received_at=datetime.now(timezone.utc),
                 fhir_observation_json={
                     'linkId': link_id,
                     'text': text,
@@ -557,28 +542,14 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                     'answer': answer,
                     'questionnaire': report_payload.get('questionnaire', ''),
                     'parent_guid': parent.guid,
+                    'value': value,
+                    'response_type': response_type,
                 },
-                value=str(value),
-                response_type=response_type,
-                validation_status='valid',
-                resolution_status='resolved',
-                is_late=is_late,
+                status=('pending' if concept_code else 'skipped'),
             )
             db.session.add(child)
-            db.session.flush()  # populate child.guid for FK below
+            db.session.flush()
             stored_items.append(child)
-            # QR child has a concept_guid (or linkId fallback). cdr1's
-            # FHIR transformer expects a real concept_guid, so mark
-            # 'skipped' when concept_code is empty and the linkId was
-            # used as a fallback — see services/fhir_observation_builder.
-            db.session.add(CdrDeliveryLog(
-                inbound_observation_guid=child.guid,
-                patient_guid=child.patient_guid,
-                service_request_guid=child.service_request_guid,
-                concept_guid=child.concept_guid,
-                received_at=child.received_at,
-                status=('pending' if concept_code else 'skipped'),
-            ))
 
     audit = AuditLog(
         event_type='report.received',

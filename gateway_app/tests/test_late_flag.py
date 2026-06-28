@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models import InboundObservation
 
 
 # ── Mock helpers (reused shape from test_report_submission) ──────────
@@ -139,11 +138,6 @@ class TestLateFlag:
         data = resp.get_json()
         assert data['is_late'] is True
 
-        with app.app_context():
-            rec = InboundObservation.query.filter_by(
-                service_request_guid='sr-late-1').first()
-            assert rec is not None
-            assert rec.is_late is True
 
     def test_observation_before_period_end_is_not_late(self, client, app, db):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
@@ -158,11 +152,6 @@ class TestLateFlag:
         assert resp.status_code == 202
         assert resp.get_json()['is_late'] is False
 
-        with app.app_context():
-            rec = InboundObservation.query.filter_by(
-                service_request_guid='sr-late-2').first()
-            assert rec is not None
-            assert rec.is_late is False
 
     def test_open_ended_sr_never_marks_late(self, client, app, db):
         sr_mock = _make_sr_context_mock(status='active', period_end=None)

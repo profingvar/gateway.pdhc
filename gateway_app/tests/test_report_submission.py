@@ -687,52 +687,42 @@ class TestDedupAfterInboundDeleted:
             },
         }
 
-    def test_batch_dedup_survives_inbound_deletion(self, client, app, db):
-        from app.models import InboundObservation, CdrDeliveryLog
+    def test_batch_dedup_works_from_log_only(self, client, app, db):
+        # #296: report_ingestion writes CdrDeliveryLog directly; there
+        # is no InboundObservation row. Dedup queries CdrDeliveryLog
+        # by (service_request_guid, payload_hash). Verify a second
+        # identical POST is short-circuited.
+        from app.models import CdrDeliveryLog
         sr = 'sr-ssot-batch-1'
         body = self._body()
         patches = _patch_all_upstreams()
 
-        # First POST → row stored, log row stored.
         with patches[0], patches[1], patches[2], patches[3]:
             r1 = client.post(f'/api/v1/provider/report/{sr}', json=body,
                              headers={'X-Provider-Token': 'valid-token'})
         assert r1.status_code == 202
         assert r1.get_json()['action'] == 'created'
 
-        # Simulate phase 5 — delete the InboundObservation row, leaving
-        # the CdrDeliveryLog row with its denormalised dedup keys.
         with app.app_context():
-            inbound = InboundObservation.query.filter_by(
-                service_request_guid=sr).first()
-            assert inbound is not None
             log = CdrDeliveryLog.query.filter_by(
-                inbound_observation_guid=inbound.guid).first()
+                service_request_guid=sr).first()
             assert log is not None
-            assert log.payload_hash is not None, (
-                'log row must carry payload_hash for post-delete dedup')
-            db.session.delete(inbound)
-            db.session.commit()
-            # Log row should still exist; FK relaxed to ON DELETE SET NULL.
-            log = CdrDeliveryLog.query.filter_by(guid=log.guid).first()
-            assert log is not None
-            assert log.inbound_observation_guid is None
             assert log.payload_hash is not None
+            assert log.inbound_observation_guid is None  # #296: never set
+            assert log.fhir_observation_json is not None
 
-        # Second POST of the exact same payload → dedup hit on the log
-        # (no InboundObservation row exists any more).
         with patches[0], patches[1], patches[2], patches[3]:
             r2 = client.post(f'/api/v1/provider/report/{sr}', json=body,
                              headers={'X-Provider-Token': 'valid-token'})
         assert r2.status_code == 202
         d = r2.get_json()
-        assert d['action'] == 'duplicate_ignored', (
-            f"expected dedup hit after inbound deletion, got {d}")
-        # receipt_guid falls back to the log guid once the FK is null.
+        assert d['action'] == 'duplicate_ignored', d
         assert d['receipt_guid'] is not None
 
-    def test_per_obs_dedup_survives_inbound_deletion(self, client, app, db):
-        from app.models import InboundObservation, CdrDeliveryLog
+    def test_per_obs_dedup_works_from_log_only(self, client, app, db):
+        # #296: per-obs (patient, tx, recorded_at) dedup_key is on the
+        # CdrDeliveryLog. A re-POST with the same dedup_key inside a
+        # different batch payload still gets caught.
         sr = 'sr-ssot-perobs-1'
         body = self._body()
         patches = _patch_all_upstreams()
@@ -742,21 +732,11 @@ class TestDedupAfterInboundDeleted:
                              headers={'X-Provider-Token': 'valid-token'})
         assert r1.status_code == 202
 
-        with app.app_context():
-            for inbound in InboundObservation.query.filter_by(
-                    service_request_guid=sr).all():
-                db.session.delete(inbound)
-            db.session.commit()
-
-        # Repost with a notes field added so the batch payload_hash
-        # differs but per-obs (patient, tx, recorded_at) dedup_key matches.
         body['report_payload']['observations'][0]['notes'] = 'differ'
         with patches[0], patches[1], patches[2], patches[3]:
             r2 = client.post(f'/api/v1/provider/report/{sr}', json=body,
                              headers={'X-Provider-Token': 'valid-token'})
         d = r2.get_json()
-        # The single obs should be reported as duplicate_prior_submission
-        # by the per-obs dedup, not stored.
         assert d['observations_stored'] == 0, d
         assert any(i['reason'] == 'duplicate_prior_submission'
                    for i in d.get('observations_ignored', [])), d
