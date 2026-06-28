@@ -38,7 +38,16 @@ class CdrDeliveryLog(db.Model):
     dedup_key = db.Column(db.String(64), nullable=True, index=True)
     service_request_guid = db.Column(db.String(36), nullable=True, index=True)
     concept_guid = db.Column(db.String(36), nullable=True, index=True)
+    transaction_guid = db.Column(db.String(36), nullable=True, index=True)
+    contract_guid = db.Column(db.String(36), nullable=True)
+    provider_org_guid = db.Column(db.String(36), nullable=True)
     received_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Full FHIR R5 Observation resource. After SSOT phase 6 (#285)
+    # this is the wire-shape source the forwarder reads when building
+    # the cdr1 ingest payload; inbound_observations is no longer
+    # involved.
+    fhir_observation_json = db.Column(db.JSON, nullable=True)
 
     cdr_resource_id = db.Column(db.String(128), nullable=True)
 
