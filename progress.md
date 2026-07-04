@@ -675,3 +675,29 @@ Each authenticated gateway.pdhc request now makes one HTTP call to
 `sso.pdhc/api/auth/me/service`. Same overhead request.pdhc already
 accepted with ticket #50. Latency impact: ~20–50ms per request on the
 LAN, negligible.
+
+---
+
+## Access-model reform X2 (#408) — 2026-07-04 (commit 29b0e13)
+
+gateway is the reference implementation for universal
+`X-Operator-Session-Id` propagation (Lag 2022:913 chain-of-custody).
+- New helper `sso_service.outbound_session_headers()` — forwards the
+  operator session id, or `{}` when none (machine-to-machine stays
+  header-less). Accepts an explicit `session_id` for non-request-context
+  callers.
+- Attached on every synchronous onward call: `sr_context`→request,
+  `contract_scope`→contract, `feed_service`→request, `analyse_client`.
+- Async gateway→cdr1 forwarder: new nullable column
+  `cdr_delivery_log.operator_session_id` captured at all 4 ingest sites,
+  replayed as `X-Operator-Session-Id` at delivery so the chain survives
+  the queue gap. Migration `e9f0a1b2c3d4` (single head).
+- `session_id` = JWT `sid` (#191), already live → NO deploy dependency.
+
+Tests: `tests/test_x2_session_propagation.py` (7, all pass). #408 left
+open (cross-cutting); remaining per-repo adoption in continuation #423.
+Operator: run `flask db upgrade` to add the column at next gateway deploy.
+
+Note: 10 pre-existing test failures in this repo (test_sso_auth.py
+auth-fixture drift + one stale contract-scope test + a test-isolation
+state-leak) are unrelated to X2 — filed as cleanup #424.
