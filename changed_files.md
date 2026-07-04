@@ -141,3 +141,25 @@ All edited files with full path, per Rule 17.
 - 2026-04-16: gateway_app/app/__init__.py — ticket #70 adds CORS on /api/v1/health (Access-Control-Allow-Origin https://www.pdhc.se + Methods GET + Vary: Origin + Cache-Control: no-store). Note: local was stale (server had _register_metadata + _register_stockholm_filter); synced server→local before edit.
 - 2026-05-28: gateway_app/app/services/contract_scope.py + gateway_app/app/services/report_ingestion.py + gateway_app/tests/test_contract_scope.py — ticket #147 (Phase G #9). validate_observations() now accepts service_request_guid; on status='completed' it unions concept_guids from the current batch with InboundObservation rows for the same SR (concept_guid IS NOT NULL, DISTINCT), so an obligatory satisfied in an earlier in-progress submission no longer needs to be re-supplied in the closing batch. report_ingestion passes the SR guid into the call. 4 new tests in TestObligatoryAcrossPriorSubmissions; all 16 contract_scope tests pass. Deployed via docker compose up -d --build app (tests/ excluded from image via .dockerignore; runtime code verified in container).
 - 2026-05-28: gateway_app/app/models/inbound_observation.py + gateway_app/app/services/report_ingestion.py + gateway_app/migrations/versions/e2f3a4b5c6d7_add_dedup_key_to_inbound_observations.py + gateway_app/tests/test_report_submission.py — ticket #148 (per-obs idempotency). New dedup_key column = sha256(patient|tx|recorded_at); partial unique index on (service_request_guid, dedup_key) WHERE dedup_key IS NOT NULL; per-obs dedup loop in Step 9 of ingest (intra-batch first-wins + cross-batch prior-submission check), response carries observations_stored / observations_ignored / action in {created, partial, duplicate_ignored}. dedup_key is NULL when recorded_at is missing (legacy behaviour preserved). Backfill: 7050/7064 rows got a dedup_key; 14 without recorded_at left NULL. Migration head e2f3a4b5c6d7. 4 new tests in TestPerObservationIdempotency, all 45 unrelated tests still pass (1 pre-existing unrelated fail in test_concept_not_in_scope).
+
+## 2026-07-04 — X2 (#408) session propagation on onward calls
+- gateway_app/app/services/sso_service.py — NEW helper outbound_session_headers()
+  (returns {'X-Operator-Session-Id': sid} or {}; accepts explicit session_id for
+  non-request-context callers like the forwarder).
+- gateway_app/app/services/feed_service.py, sr_context.py, contract_scope.py,
+  analyse_client.py — attach outbound_session_headers() on the synchronous
+  onward calls (→request, →contract, →analyse).
+- gateway_app/app/models/cdr_delivery_log.py — new nullable column
+  operator_session_id (captures the operator session at ingest).
+- gateway_app/app/services/report_ingestion.py — capture current_session_id()
+  onto all 4 CdrDeliveryLog creation sites at ingest.
+- gateway_app/app/services/cdr_client.py — _headers()/deliver_one() accept
+  session_id and set X-Operator-Session-Id (replay on async delivery).
+- gateway_app/app/services/cdr_forwarder.py — pass log.operator_session_id to
+  deliver_one so the async gateway→cdr1 hop keeps the chain-of-custody.
+- gateway_app/migrations/versions/e9f0a1b2c3d4_*.py — Alembic migration for the
+  new nullable column (single head).
+- gateway_app/tests/test_x2_session_propagation.py — NEW, 7 tests (helper,
+  client header, forwarder replay of captured sid + None passthrough). All pass.
+  (Pre-existing unrelated failure: test_report_submission TestContractScope::
+  test_concept_not_in_scope — fails on baseline too, not touched by X2.)

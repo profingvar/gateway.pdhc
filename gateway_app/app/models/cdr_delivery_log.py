@@ -59,6 +59,13 @@ class CdrDeliveryLog(db.Model):
 
     cdr_resource_id = db.Column(db.String(128), nullable=True)
 
+    # X2 (#408): the operator session (SSO `sid` claim / X-Operator-Session-Id)
+    # under which this observation was ingested, captured at ingest time so the
+    # async forwarder can replay it to cdr1 and the Lag (2022:913)
+    # chain-of-custody survives the request→(queue)→delivery gap. NULL for
+    # machine-to-machine pushes with no operator session (legacy contract).
+    operator_session_id = db.Column(db.String(128), nullable=True)
+
     status = db.Column(db.String(32), nullable=False,
                        default='pending', index=True)
 

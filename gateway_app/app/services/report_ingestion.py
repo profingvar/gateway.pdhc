@@ -46,6 +46,7 @@ from .grant_validation import GrantValidationService
 from .sr_context import SRContextService
 from .contract_scope import ContractScopeService
 from .observation_validator import ObservationValidator
+from .sso_service import current_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +377,7 @@ class ReportIngestionService:
                     dedup_key=dedup_key,
                     received_at=datetime.now(timezone.utc),
                     fhir_observation_json=obs,
+                    operator_session_id=current_session_id(),  # X2 #408
                     status=('pending' if obs.get('concept_guid') else 'skipped'),
                 )
                 db.session.add(record)
@@ -394,6 +396,7 @@ class ReportIngestionService:
                 payload_hash=payload_hash,
                 received_at=datetime.now(timezone.utc),
                 fhir_observation_json=report_payload,
+                operator_session_id=current_session_id(),  # X2 #408
                 status='skipped',
             )
             db.session.add(record)
@@ -500,6 +503,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
         payload_hash=payload_hash,
         received_at=datetime.now(timezone.utc),
         fhir_observation_json=report_payload,
+        operator_session_id=current_session_id(),  # X2 #408
         status='skipped',
     )
     db.session.add(parent)
@@ -548,6 +552,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                     'value': value,
                     'response_type': response_type,
                 },
+                operator_session_id=current_session_id(),  # X2 #408
                 status=('pending' if concept_code else 'skipped'),
             )
             db.session.add(child)

@@ -37,7 +37,7 @@ class CdrClient:
         return current_app.config['CDR_BASE_URL'].rstrip('/')
 
     @classmethod
-    def _headers(cls, request_id):
+    def _headers(cls, request_id, session_id=None):
         key = current_app.config.get('GATEWAY_PDHC_SERVICE_KEY', '')
         h = {
             'Content-Type': 'application/json',
@@ -47,10 +47,15 @@ class CdrClient:
         }
         if key:
             h['X-Service-Key'] = key
+        # X2 (#408): replay the operator session captured at ingest so cdr1's
+        # audit rows correlate to the originating operator session even though
+        # delivery happens asynchronously (no live request context here).
+        if session_id:
+            h['X-Operator-Session-Id'] = str(session_id)[:128]
         return h
 
     @classmethod
-    def deliver_one(cls, payload, request_id):
+    def deliver_one(cls, payload, request_id, session_id=None):
         """POST a single observation to cdr1.
 
         Returns the parsed JSON response body on success (cdr1 echoes
@@ -62,7 +67,8 @@ class CdrClient:
 
         try:
             resp = requests.post(
-                url, json=payload, headers=cls._headers(request_id),
+                url, json=payload,
+                headers=cls._headers(request_id, session_id),
                 timeout=timeout,
             )
         except requests.RequestException as e:

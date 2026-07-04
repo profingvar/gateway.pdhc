@@ -154,7 +154,10 @@ def _deliver_one(log):
     ))
 
     try:
-        body = CdrClient.deliver_one(payload, request_id=log.guid)
+        # X2 (#408): replay the operator session captured on the row at ingest.
+        body = CdrClient.deliver_one(
+            payload, request_id=log.guid,
+            session_id=log.operator_session_id)
     except CdrRejected as e:
         # 4xx from cdr1 — terminal, do not retry
         _mark_failed_terminal(log, f"cdr1 {e.status_code}: {e.body[:200]}")

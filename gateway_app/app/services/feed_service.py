@@ -14,6 +14,7 @@ import requests as http_requests
 
 from ..models import AuditLog
 from ..extensions import db
+from .sso_service import outbound_session_headers
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class FeedService:
                 headers={
                     'X-Provider-Token': raw_token,
                     'X-Correlation-Id': flask_request.headers.get('X-Correlation-Id', ''),
+                    **outbound_session_headers(),  # X2 #408
                 },
                 params=params,
                 timeout=current_app.config.get('PUSH_TIMEOUT_SECONDS', 30),
@@ -87,6 +89,7 @@ class FeedService:
                 headers={
                     'X-Provider-Token': raw_token,
                     'X-Correlation-Id': flask_request.headers.get('X-Correlation-Id', ''),
+                    **outbound_session_headers(),  # X2 #408
                 },
                 timeout=current_app.config.get('PUSH_TIMEOUT_SECONDS', 30),
             )

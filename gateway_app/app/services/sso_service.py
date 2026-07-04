@@ -33,6 +33,27 @@ def current_session_id():
     return None
 
 
+def outbound_session_headers(session_id=None):
+    """Headers to attach to an onward service-to-service call so the
+    operator session propagates (X2, ticket #408).
+
+    Returns ``{'X-Operator-Session-Id': <sid>}`` when a session id is
+    available, else ``{}`` (never forwards an empty header — legacy /
+    machine-to-machine calls stay header-less, matching the receiver's
+    "NULL = no operator correlation" contract).
+
+    Pass ``session_id`` explicitly for calls made OUTSIDE a request
+    context (e.g. the APScheduler cdr forwarder, which replays the
+    operator sid captured on the CdrDeliveryLog row at ingest time).
+    When omitted, resolves from the current request via
+    :func:`current_session_id`.
+    """
+    sid = session_id if session_id is not None else current_session_id()
+    if sid:
+        return {'X-Operator-Session-Id': str(sid)[:128]}
+    return {}
+
+
 def initiate_sso_login(next_url, state):
     """Build SSO login redirect URL."""
     sso_base = current_app.config['SSO_BASE_URL']

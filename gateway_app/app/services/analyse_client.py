@@ -15,6 +15,8 @@ side — operator copies it across.
 import requests
 from flask import current_app
 
+from .sso_service import outbound_session_headers
+
 
 class AnalyseUnavailable(Exception):
     """Transient: dashboard unreachable / 5xx / timeout. Caller decides
@@ -49,6 +51,7 @@ class AnalyseClient:
         }
         if key:
             h['X-Service-Key'] = key
+        h.update(outbound_session_headers())  # X2 #408
         return h
 
     @classmethod

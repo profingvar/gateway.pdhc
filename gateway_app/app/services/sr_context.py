@@ -14,6 +14,7 @@ from flask import current_app
 
 from ..models import GuidResolutionCache
 from ..extensions import db
+from .sso_service import outbound_session_headers
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,8 @@ def _fetch_upstream(sr_guid):
     try:
         resp = http_requests.get(
             f'{base_url}/internal/service-request/{sr_guid}/context',
-            headers={'X-Service-Key': service_key},
+            headers={'X-Service-Key': service_key,
+                     **outbound_session_headers()},  # X2 #408
             timeout=10,
         )
     except http_requests.RequestException as e:
