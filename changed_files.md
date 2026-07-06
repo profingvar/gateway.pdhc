@@ -163,3 +163,11 @@ All edited files with full path, per Rule 17.
   client header, forwarder replay of captured sid + None passthrough). All pass.
   (Pre-existing unrelated failure: test_report_submission TestContractScope::
   test_concept_not_in_scope — fails on baseline too, not touched by X2.)
+
+## 2026-07-06 — M0 #418: Zone-1 scope on receive-phase reads
+- gateway_app/app/services/sso_service.py — scope_org_guids() (affiliations[].
+  care_unit_guid, dual-read fallback); has_analysis_access reads session_phases
+  w/ effective_phases fallback.
+- gateway_app/app/api/observations.py — the receive-phase org scope check uses
+  scope_org_guids(blob) instead of blob['organization_ids'].
+- gateway_app/tests/test_reform_scope.py — NEW, 7 tests.

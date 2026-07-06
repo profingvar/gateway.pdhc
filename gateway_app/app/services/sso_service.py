@@ -152,13 +152,26 @@ def map_role(access_blob):
     return 'read_only'
 
 
+def scope_org_guids(access_blob):
+    """Zone-1 read scope (M0 #418): affiliations[].care_unit_guid — the exact
+    equivalent of the legacy flat organization_ids semantics — with a dual-read
+    fallback to organization_ids for tokens issued before the reform blob went
+    live. Zone-2 (parent care organisation) is deliberately NOT folded in here.
+    """
+    affs = (access_blob or {}).get('affiliations') or []
+    if affs:
+        return [a['care_unit_guid'] for a in affs if a.get('care_unit_guid')]
+    return list((access_blob or {}).get('organization_ids') or [])
+
+
 def has_analysis_access(access_blob):
     """True if user is admin or has analysis phase assignment."""
     if not access_blob:
         return False
     if access_blob.get('is_su_admin'):
         return True
-    phases = access_blob.get('effective_phases') or []
+    # M0 #418: prefer reform session_phases (Option C), legacy fallback.
+    phases = access_blob.get('session_phases') or access_blob.get('effective_phases') or []
     return access_blob.get('user_type') == 'professional' and 'analysis' in phases
 
 

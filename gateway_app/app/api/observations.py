@@ -34,7 +34,7 @@ from flask import request, jsonify
 from . import api_bp
 from ..models import ServiceRequestStatus, AuditLog
 from ..extensions import db
-from ..services.sso_service import validate_sso_token, has_analysis_access
+from ..services.sso_service import validate_sso_token, has_analysis_access, scope_org_guids
 from ..services.contract_scope import ContractScopeService
 from ..services.analyse_client import (
     AnalyseClient, AnalyseRejected, AnalyseUnavailable,
@@ -154,7 +154,8 @@ def list_observations():
         return jsonify({'error': 'analysis phase required'}), 403
 
     is_admin = bool(blob.get('is_su_admin'))
-    user_orgs = list(blob.get('organization_ids') or [])
+    # M0 #418: Zone-1 scope from affiliations[] (dual-read fallback).
+    user_orgs = scope_org_guids(blob)
     if not is_admin and org_guid not in user_orgs:
         return jsonify({'error': 'organization not in your scope'}), 403
 
