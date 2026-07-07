@@ -453,9 +453,27 @@ class TestPatientCrossCheck:
 class TestContractScope:
 
     def test_concept_not_in_scope(self, client, app, db):
+        """SCOPE_VIOLATION fires when the AUTHORITATIVE concept (derived from SR
+        context — gateway overwrites any provider-supplied concept_guid, see the
+        module docstring / report_ingestion §6,§29) is not in the contract's
+        return scope. This models a plan-vs-contract mismatch: the SR
+        transaction names a concept the contract never authorised.
+
+        (Reworked #424: the old version set the *provider-supplied* concept_guid
+        to an out-of-scope value and expected 403 — but that value is now
+        discarded before the scope check, so it can no longer trigger this. See
+        test_provider_supplied_concept_is_ignored for that security property.)
+        """
+        # SR context resolves tx-002 -> concept-999, which the contract scope
+        # (concept-001 obligatory + concept-002 optional) does not permit.
+        def _sr_ctx_oos(*args, **kwargs):
+            resp = _mock_sr_context(*args, **kwargs)
+            data = resp.json.return_value
+            data['transactions'][1]['concept_guid'] = 'concept-999'
+            return resp
+
         body = _make_minimal_body()
-        body['report_payload']['observations'][1]['concept_guid'] = 'concept-999'
-        patches = _patch_all_upstreams()
+        patches = _patch_all_upstreams(sr_context_mock=_sr_ctx_oos)
         with patches[0], patches[1], patches[2], patches[3]:
             resp = client.post(
                 '/api/v1/provider/report/sr-scope-test',
@@ -464,6 +482,22 @@ class TestContractScope:
             )
         assert resp.status_code == 403
         assert resp.get_json()['code'] == 'SCOPE_VIOLATION'
+
+    def test_provider_supplied_concept_is_ignored(self, client, app, db):
+        """Security property (#29): a provider CANNOT influence the concept —
+        gateway overwrites concept_guid from the authoritative SR context. A
+        provider sending an out-of-scope concept_guid therefore does NOT cause a
+        SCOPE_VIOLATION; the transaction's real (in-scope) concept is stored."""
+        body = _make_minimal_body()
+        body['report_payload']['observations'][1]['concept_guid'] = 'concept-999'
+        patches = _patch_all_upstreams()  # SR context maps tx-002 -> concept-002
+        with patches[0], patches[1], patches[2], patches[3]:
+            resp = client.post(
+                '/api/v1/provider/report/sr-scope-test',
+                json=body,
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        assert resp.status_code == 202  # accepted; provider concept discarded
 
     def test_missing_obligatory_on_completed(self, client, app, db):
         body = _make_minimal_body()

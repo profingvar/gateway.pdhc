@@ -1,8 +1,29 @@
 """Tests for SSO authentication and role-based access control."""
 import pytest
 from unittest.mock import patch
+from flask import session as flask_session
 from app import create_app
 from app.extensions import db as _db
+
+
+@pytest.fixture(autouse=True)
+def _echo_revalidation():
+    """Ticket #93 made ``get_access_blob`` re-validate the bearer token against
+    SSO on *every* request (no caching), so a directly-set
+    ``session['access_blob']`` is no longer trusted on its own — the
+    re-validation call to the unreachable test SSO returns None and the route
+    redirects (302). Patch ``validate_sso_token`` to echo back whatever blob the
+    test 'logged in' via ``_login_as`` (stored in the session), simulating a
+    successful re-validation. Tests that need the invalid-token path re-patch
+    ``validate_sso_token`` themselves, which overrides this within the test.
+    """
+    def _echo(_token):
+        try:
+            return flask_session.get('access_blob')
+        except RuntimeError:  # no request context
+            return None
+    with patch('app.services.sso_service.validate_sso_token', side_effect=_echo):
+        yield
 
 
 class SSOEnabledConfig:

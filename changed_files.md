@@ -171,3 +171,19 @@ All edited files with full path, per Rule 17.
 - gateway_app/app/api/observations.py — the receive-phase org scope check uses
   scope_org_guids(blob) instead of blob['organization_ids'].
 - gateway_app/tests/test_reform_scope.py — NEW, 7 tests.
+
+## 2026-07-07 — #424: fix 10 pre-existing gateway test failures (suite now green)
+- gateway_app/tests/test_sso_auth.py — autouse _echo_revalidation fixture:
+  #93 made get_access_blob re-validate the token every request, so a
+  directly-set session['access_blob'] is no longer trusted; patch
+  validate_sso_token to echo the logged-in blob. Fixes 9 (302!=200).
+- gateway_app/tests/test_report_submission.py — reworked test_concept_not_in_scope
+  to trigger SCOPE_VIOLATION via an SR-context-derived out-of-scope concept
+  (provider-supplied concept_guid is now overwritten authoritatively, §29);
+  added test_provider_supplied_concept_is_ignored documenting that security
+  property (202). Fixes 1.
+- gateway_app/tests/test_push_service.py — add the push_secret arg to 3
+  send_receipt_to_provider calls (stale 2-arg signature). Fixes 3.
+- Suite: 277 passed, 5 skipped, 0 failed (deterministic). The "test isolation"
+  concern in the ticket was a misdiagnosis — the extra full-run failures were
+  these independent stale push tests, not a state leak.

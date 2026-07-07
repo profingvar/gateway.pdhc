@@ -167,6 +167,7 @@ class TestReceiptPush:
                 mock_post.return_value = FakeResponse(201)
                 ok = PushService.send_receipt_to_provider(
                     'http://localhost:9070/api/v1',
+                    'test-push-secret',  # #424: push_secret arg (HMAC signing)
                     {'receipt_guid': 'rcpt-1', 'service_request_guid': 'sr-1'},
                 )
                 assert ok is True
@@ -180,6 +181,7 @@ class TestReceiptPush:
                 mock_post.return_value = FakeResponse(500)
                 ok = PushService.send_receipt_to_provider(
                     'http://localhost:9070/api/v1',
+                    'test-push-secret',  # #424: push_secret arg (HMAC signing)
                     {'receipt_guid': 'rcpt-1'},
                 )
                 assert ok is False
@@ -192,6 +194,7 @@ class TestReceiptPush:
                 mock_post.side_effect = requests.ConnectionError()
                 ok = PushService.send_receipt_to_provider(
                     'http://localhost:9070/api/v1',
+                    'test-push-secret',  # #424: push_secret arg (HMAC signing)
                     {'receipt_guid': 'rcpt-1'},
                 )
                 assert ok is False
