@@ -193,3 +193,8 @@ All edited files with full path, per Rule 17.
 - gateway_app/app/services/sr_context.py — EDIT (#490). SRContextResult.as_builder_context() exposes the raw SR payload for the builder.
 - gateway_app/app/services/cdr_forwarder.py — EDIT (#490). _build_payload fetches the SR context and passes sr_contexts/contract_scopes (plan/org/requester provenance) instead of None; context-fetch failure never blocks delivery.
 - gateway_app/tests/test_fhir_observation_builder.py — NEW. 9 tests (value typing, unit code, category, meta, missing-value crash, forwarder provenance + fail-safe).
+
+## 2026-08-01 — #500 canonical observation block
+- gateway_app/app/services/fhir_observation_builder.py — EDIT (#500). build_canonical_observation() (typed core: concept_guid/value/response_type/unit/range/effective_at, never float-coerced); emitted as the canonical-observation FHIR extension so it survives cdr1 storage + analyse federation.
+- gateway_app/app/services/cdr_forwarder.py — EDIT (#500). envelope carries the additive `observation` block alongside fhir_resource (non-breaking).
+- gateway_app/tests/test_fhir_observation_builder.py — +3 tests (canonical typed value, FHIR extension, envelope block).

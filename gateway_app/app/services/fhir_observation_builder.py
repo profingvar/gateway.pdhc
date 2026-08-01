@@ -39,6 +39,33 @@ def _to_bool(v):
     return str(v).strip().lower() in ('true', '1', 'yes', 'y', 't')
 
 
+CANONICAL_OBS_EXT = 'urn:pdhc:fhir:extension:canonical-observation'
+
+
+def build_canonical_observation(row):
+    """The canonical typed observation core (#500).
+
+    The single source of BOTH the FHIR and openEHR projections. Values are
+    carried in their DECLARED type (never float-coerced), so a downstream
+    renderer (rosetta openEHR, #501) does not inherit FHIR's lossiness — a
+    categorical stays a string, a boolean stays a bool. ``unit`` is the plan.pdhc
+    unit code (rosetta translates it to UCUM via its concept map's unit bridge).
+    """
+    raw = row.fhir_observation_json or {}
+    received = getattr(row, 'received_at', None)
+    eff = raw.get('recorded_at') or (received.isoformat() if received else None)
+    return {
+        'concept_guid': getattr(row, 'concept_guid', None) or raw.get('concept_guid'),
+        'value': raw.get('value'),
+        'response_type': raw.get('response_type'),
+        'unit': raw.get('unit') or None,
+        'unit_display': raw.get('unit_display') or None,
+        'range_min': raw.get('range_min'),
+        'range_max': raw.get('range_max'),
+        'effective_at': eff,
+    }
+
+
 def _add_typed_value(obs, value, rtype, unit_display, unit_code):
     """Emit the correct value[x] for the DECLARED response_type (#489.1/2).
 
@@ -281,6 +308,14 @@ def build_fhir_observation(row, sr_contexts=None, contract_scopes=None):
             graph_ext['extension'].append(
                 {'url': 'graph-provider-url', 'valueUrl': graph_provider_url})
         extensions.append(graph_ext)
+
+    # #500: carry the canonical typed observation as an extension so the openEHR
+    # projection (rosetta, #501) reads the real typed value — not the lossy FHIR
+    # value[x]. This rides the resource through cdr1 storage + analyse federation.
+    extensions.append({
+        'url': CANONICAL_OBS_EXT,
+        'valueString': json.dumps(build_canonical_observation(row)),
+    })
 
     if extensions:
         obs['extension'] = extensions

@@ -90,3 +90,30 @@ def test_forwarder_survives_context_fetch_failure(monkeypatch):
     monkeypatch.setattr(fwd.SRContextService, "fetch", staticmethod(boom))
     obs = fwd._build_payload(log)["fhir_resource"]  # must not raise
     assert obs["valueQuantity"]["value"] == 5
+
+
+# ---- #500 canonical observation block -----------------------------------
+def test_canonical_carries_typed_value():
+    from app.services.fhir_observation_builder import build_canonical_observation
+    co = build_canonical_observation(_row({"value": True, "response_type": "boolean", "concept_guid": "c1"}))
+    assert co["value"] is True and co["response_type"] == "boolean"
+
+
+def test_fhir_carries_canonical_extension():
+    import json
+    from app.services.fhir_observation_builder import CANONICAL_OBS_EXT
+    obs = build_fhir_observation(_row({"value": "120", "response_type": "categorical"}))
+    ext = next(e for e in obs["extension"] if e["url"] == CANONICAL_OBS_EXT)
+    payload = json.loads(ext["valueString"])
+    assert payload["value"] == "120" and payload["response_type"] == "categorical"
+
+
+def test_forwarder_envelope_has_observation_block():
+    log = SimpleNamespace(
+        guid="l", concept_guid="c1", patient_guid="p", service_request_guid=None,
+        contract_guid=None, provider_org_guid=None, transaction_guid=None, received_at=None,
+        fhir_observation_json={"value": 72.5, "response_type": "numeric", "unit": "kg"})
+    payload = fwd._build_payload(log)
+    assert payload["observation"]["value"] == 72.5
+    assert payload["observation"]["response_type"] == "numeric"
+    assert "fhir_resource" in payload  # projection kept for back-compat

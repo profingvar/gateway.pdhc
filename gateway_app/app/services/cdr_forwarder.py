@@ -23,7 +23,7 @@ from sqlalchemy import text
 from ..extensions import db
 from ..models import CdrDeliveryLog, AuditLog
 from .cdr_client import CdrClient, CdrRejected, CdrUnavailable
-from .fhir_observation_builder import build_fhir_observation
+from .fhir_observation_builder import build_fhir_observation, build_canonical_observation
 from .sr_context import SRContextService
 
 logger = logging.getLogger(__name__)
@@ -239,6 +239,9 @@ def _build_payload(log_row):
         'patient_guid': log_row.patient_guid,
         'source_type': 'fhir',
         'source_system_id': log_row.guid,
+        # #500: canonical typed observation — the source of both projections.
+        # Additive + non-breaking; existing readers keep using fhir_resource.
+        'observation': build_canonical_observation(log_row),
         'fhir_resource': fhir_obs,
         'clinical_context': {
             'service_request_guid': log_row.service_request_guid,
