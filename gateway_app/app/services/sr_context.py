@@ -82,6 +82,15 @@ class SRContextResult:
             if t.get('transaction_guid')
         }
 
+    def as_builder_context(self):
+        """The raw SR payload dict for fhir_observation_builder (#490).
+
+        Carries plan_definition_guid, goals, and requester_user_* so the CDR
+        forwarder can restore provenance the builder was previously handed a
+        None for. Returns a shallow copy.
+        """
+        return dict(self._data)
+
 
 class SRContextService:
     """Fetches SR context from request.pdhc internal API."""

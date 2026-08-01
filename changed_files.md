@@ -187,3 +187,9 @@ All edited files with full path, per Rule 17.
 - Suite: 277 passed, 5 skipped, 0 failed (deterministic). The "test isolation"
   concern in the ticket was a misdiagnosis — the extra full-run failures were
   these independent stale push tests, not a state leak.
+
+## 2026-08-01 — #489 FHIR value-typing + #490 forwarder provenance/crash
+- gateway_app/app/services/fhir_observation_builder.py — EDIT (#489/#490). value[x] now dispatched on the declared response_type (numeric→valueQuantity, categorical→valueCodeableConcept, boolean→valueBoolean, dateTime→valueDateTime, text/graph→valueString); Quantity unit=display, code=machine unit (was display); category survey vs laboratory; meta.profile added; removed the row.value crash line (CdrDeliveryLog has no such column).
+- gateway_app/app/services/sr_context.py — EDIT (#490). SRContextResult.as_builder_context() exposes the raw SR payload for the builder.
+- gateway_app/app/services/cdr_forwarder.py — EDIT (#490). _build_payload fetches the SR context and passes sr_contexts/contract_scopes (plan/org/requester provenance) instead of None; context-fetch failure never blocks delivery.
+- gateway_app/tests/test_fhir_observation_builder.py — NEW. 9 tests (value typing, unit code, category, meta, missing-value crash, forwarder provenance + fail-safe).

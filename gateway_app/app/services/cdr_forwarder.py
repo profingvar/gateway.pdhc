@@ -24,6 +24,7 @@ from ..extensions import db
 from ..models import CdrDeliveryLog, AuditLog
 from .cdr_client import CdrClient, CdrRejected, CdrUnavailable
 from .fhir_observation_builder import build_fhir_observation
+from .sr_context import SRContextService
 
 logger = logging.getLogger(__name__)
 
@@ -214,8 +215,26 @@ def _build_payload(log_row):
     transaction_guid, contract_guid, provider_org_guid, received_at,
     concept_guid). No InboundObservation lookup required.
     """
-    fhir_obs = build_fhir_observation(log_row, sr_contexts=None,
-                                      contract_scopes=None)
+    # #490: restore provenance. The SR context (plan_definition_guid, goals,
+    # requester, requesting_org) is fetched from request.pdhc and handed to the
+    # builder; previously this was None so ALL of it was dropped from CDR1.
+    # A context-fetch failure must NOT block delivery — forward without it.
+    sr_contexts, contract_scopes = {}, {}
+    sr_guid = log_row.service_request_guid
+    if sr_guid:
+        try:
+            ctx = SRContextService.fetch(sr_guid)
+            if ctx.found:
+                sr_contexts = {sr_guid: ctx.as_builder_context()}
+                if log_row.contract_guid and ctx.requesting_org_guid:
+                    contract_scopes = {log_row.contract_guid: {
+                        'parties': {'requesting_org_guid': ctx.requesting_org_guid}}}
+        except Exception as e:  # noqa: BLE001 — provenance is best-effort
+            logger.warning("SR context fetch failed for %s (%s); forwarding "
+                           "without provenance", sr_guid, e)
+
+    fhir_obs = build_fhir_observation(log_row, sr_contexts=sr_contexts,
+                                      contract_scopes=contract_scopes)
     return {
         'patient_guid': log_row.patient_guid,
         'source_type': 'fhir',
