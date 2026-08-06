@@ -139,14 +139,20 @@ def map_role(access_blob):
     """Map SSO access blob → local role string.
 
     admin     — is_su_admin
-    analyst   — professional with 'analysis' in effective_phases
+    analyst   — professional with 'analysis' in session_phases
+                (reform; legacy effective_phases fallback)
     read_only — everything else (should not reach protected views)
     """
     if not access_blob:
         return 'read_only'
     if access_blob.get('is_su_admin'):
         return 'admin'
-    phases = access_blob.get('effective_phases') or []
+    # M0 #409: prefer reform session_phases; fall back to the dual-emitted
+    # legacy effective_phases. Without this, the /callback login gate
+    # (web/auth.py) misclassifies analysts as read_only once SSO stops
+    # emitting effective_phases (SSO_EMIT_LEGACY_BLOB_FIELDS=false).
+    phases = (access_blob.get('session_phases')
+              or access_blob.get('effective_phases') or [])
     if access_blob.get('user_type') == 'professional' and 'analysis' in phases:
         return 'analyst'
     return 'read_only'
