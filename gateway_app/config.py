@@ -78,7 +78,7 @@ class Config:
     # reads across CDR1–6 are analyse's job; cdr1 only owns per-point
     # storage.
     ANALYSE_BASE_URL = os.environ.get(
-        'ANALYSE_BASE_URL', 'http://host.docker.internal:9027')
+        'ANALYSE_BASE_URL', 'http://host.docker.internal:9110')
     ANALYSE_TIMEOUT_SECONDS = int(
         os.environ.get('ANALYSE_TIMEOUT_SECONDS', '30'))
 
