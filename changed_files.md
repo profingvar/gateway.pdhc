@@ -198,3 +198,4 @@ All edited files with full path, per Rule 17.
 - gateway_app/app/services/fhir_observation_builder.py — EDIT (#500). build_canonical_observation() (typed core: concept_guid/value/response_type/unit/range/effective_at, never float-coerced); emitted as the canonical-observation FHIR extension so it survives cdr1 storage + analyse federation.
 - gateway_app/app/services/cdr_forwarder.py — EDIT (#500). envelope carries the additive `observation` block alongside fhir_resource (non-breaking).
 - gateway_app/tests/test_fhir_observation_builder.py — +3 tests (canonical typed value, FHIR extension, envelope block).
+- gateway.pdhc/gateway_app/docs/gateway_technical_guide.md (Port Allocation section)

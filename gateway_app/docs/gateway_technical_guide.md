@@ -259,3 +259,13 @@ ORDER BY created_at DESC;
 Both surface the same answer; the granularity choice changes only
 which side pays the storage cost (writer-side row explosion vs.
 reader-side JSONB index lookup).
+
+## Port Allocation
+
+All ports bind to `127.0.0.1` (loopback only); external traffic arrives
+via the reverse proxy.
+
+| Port | Service |
+|------|---------|
+| 9050 | Flask application (Gunicorn) |
+| 9051 | PostgreSQL database |
