@@ -199,3 +199,5 @@ All edited files with full path, per Rule 17.
 - gateway_app/app/services/cdr_forwarder.py — EDIT (#500). envelope carries the additive `observation` block alongside fhir_resource (non-breaking).
 - gateway_app/tests/test_fhir_observation_builder.py — +3 tests (canonical typed value, FHIR extension, envelope block).
 - gateway.pdhc/gateway_app/docs/gateway_technical_guide.md (Port Allocation section)
+- gateway_app/app/services/contract_scope.py (_fetch_upstream: use public /fhir/Contract/<guid>/scope not /internal/ (proxy sent /internal to web UI → HTML 200 → resp.json() 500); guard resp.json() fail-safe)
+- gateway_app/tests/test_contract_scope.py (+ non-JSON-200 → SERVICE_UNAVAILABLE regression)

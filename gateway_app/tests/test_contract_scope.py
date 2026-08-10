@@ -36,6 +36,20 @@ class TestFetchScope:
         assert result.optional_guids == {'concept-3'}
         assert result.all_permitted_guids == {'concept-1', 'concept-2', 'concept-3'}
 
+    def test_non_json_200_is_unavailable_not_500(self, app):
+        """A 200 with a non-JSON body (proxy mis-route → HTML page) must NOT
+        raise — it fails safe to 'unavailable' so the caller can fail-open."""
+        bad = MagicMock()
+        bad.status_code = 200
+        bad.headers = {'content-type': 'text/html'}
+        bad.json.side_effect = ValueError('Expecting value')
+        with app.app_context():
+            with patch('app.services.contract_scope.http_requests.get',
+                       return_value=bad):
+                result = ContractScopeService.fetch_scope('contract-html')
+        assert result.valid is False
+        assert result.error_code == 'SERVICE_UNAVAILABLE'
+
     def test_no_scope_defined(self, app):
         with app.app_context():
             with patch('app.services.contract_scope.http_requests.get',

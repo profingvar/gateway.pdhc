@@ -255,27 +255,36 @@ def _set_cache(contract_guid, data):
 
 
 def _fetch_upstream(contract_guid):
-    """Fetch scope from contract.pdhc internal API."""
-    base_url = current_app.config.get('CONTRACT_SERVICE_URL', '')
-    service_key = current_app.config.get('CONTRACT_INTERNAL_SERVICE_KEY', '')
+    """Fetch scope from contract.pdhc.
 
-    if not base_url or not service_key:
-        logger.error('CONTRACT_SERVICE_URL or CONTRACT_INTERNAL_SERVICE_KEY not configured')
+    Uses the PUBLIC ``/fhir/Contract/<guid>/scope`` endpoint. The
+    ``/internal/contract/<guid>/scope`` route the gateway used previously is
+    unreachable in this deployment: the public host's reverse proxy routes
+    ``/internal/*`` to the contract WEB UI (returns an HTML page — a 200 that
+    made ``resp.json()`` raise and 500 the whole ingest), and the internal API
+    is bound to host-loopback only, so this container can't reach it directly.
+    The ``/fhir`` scope endpoint is public, correctly proxied to the API, and
+    returns the same ``{contract_guid, status, scope_defined, request_scope,
+    return_scope}`` shape.
+
+    Known gap: the ``/fhir`` response omits ``parties`` (present on the
+    internal route), so ``fetch_parties`` degrades to the empty default until
+    contract.pdhc adds ``parties`` to the public endpoint — tracked separately.
+    """
+    base_url = current_app.config.get('CONTRACT_SERVICE_URL', '')
+    if not base_url:
+        logger.error('CONTRACT_SERVICE_URL not configured')
         return None
 
     try:
         resp = http_requests.get(
-            f'{base_url}/internal/contract/{contract_guid}/scope',
-            headers={'X-Service-Key': service_key,
+            f'{base_url}/fhir/Contract/{contract_guid}/scope',
+            headers={'Accept': 'application/json',
                      **outbound_session_headers()},  # X2 #408
             timeout=10,
         )
     except http_requests.RequestException as e:
         logger.error('Contract scope fetch failed: %s', e)
-        return None
-
-    if resp.status_code == 401:
-        logger.error('Contract scope auth rejected — check CONTRACT_INTERNAL_SERVICE_KEY')
         return None
 
     if resp.status_code == 404:
@@ -286,4 +295,14 @@ def _fetch_upstream(contract_guid):
         logger.warning('Contract scope returned %d for %s', resp.status_code, contract_guid)
         return None
 
-    return resp.json()
+    # Guard against a non-JSON 200 (e.g. an HTML page from a proxy
+    # mis-route) — never let it 500 the caller; fail-safe to "unavailable".
+    try:
+        return resp.json()
+    except ValueError:
+        logger.error(
+            'Contract scope returned non-JSON (%s) for %s — check the reverse-'
+            'proxy routing of /fhir on contract.pdhc',
+            resp.headers.get('content-type'), contract_guid,
+        )
+        return None
