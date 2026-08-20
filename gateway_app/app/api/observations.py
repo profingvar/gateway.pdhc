@@ -199,7 +199,7 @@ def list_observations():
         )
         return jsonify(_empty_bundle()), 200
 
-    # Proxy to the analyse layer (dashboard.pdhc since #291). Analyse
+    # Proxy to the analyse layer (analyse.pdhc since #540; was dashboard.pdhc #291). Analyse
     # trusts gateway's SSO + phase-gate + contract-scope decision; we
     # forward X-Source-Service: gateway.pdhc + X-Service-Key + the
     # pre-computed SR filter. Analyse federates over CDR1–6 and

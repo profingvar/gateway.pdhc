@@ -1,15 +1,16 @@
-"""HTTP client for the analyse-pull proxy: gateway.pdhc → dashboard.pdhc.
+"""HTTP client for the analyse-pull proxy: gateway.pdhc → analyse.pdhc.
 
 Phase 5 of the cdr1 SSOT cutover (ticket #291,
 docs/cdr1_ssot_cutover_plan.md §7 → plans/cdr1_analyse_split_plan.md
 §5). Replaces ``CdrClient.search_observations`` — gateway no longer
-proxies analyse-pull to cdr1; the dashboard's analyse layer
-federates over CDR1–6 and returns one Bundle.
+proxies analyse-pull to cdr1; analyse.pdhc's analyse layer
+federates over CDR1–6 and returns one Bundle. (#540: repointed from
+dashboard.pdhc to the standalone analyse.pdhc service, port 9110.)
 
 Auth scheme is the same as CdrClient: ``X-Source-Service: gateway.pdhc``
 + ``X-Service-Key`` against the receiving service's known-services map.
-Dashboard.pdhc adds ``gateway.pdhc → GATEWAY_PDHC_SERVICE_KEY`` so the
-same key value gateway already uses can be reused on the dashboard
+analyse.pdhc adds ``gateway.pdhc → GATEWAY_PDHC_SERVICE_KEY`` so the
+same key value gateway already uses can be reused on the analyse
 side — operator copies it across.
 """
 import requests
@@ -19,13 +20,13 @@ from .sso_service import outbound_session_headers
 
 
 class AnalyseUnavailable(Exception):
-    """Transient: dashboard unreachable / 5xx / timeout. Caller decides
+    """Transient: analyse.pdhc unreachable / 5xx / timeout. Caller decides
     whether to surface a hard failure or fall back to a soft empty
     bundle."""
 
 
 class AnalyseRejected(Exception):
-    """Terminal: dashboard 4xx — semantic rejection. Not retryable."""
+    """Terminal: analyse.pdhc 4xx — semantic rejection. Not retryable."""
 
     def __init__(self, status_code, body):
         self.status_code = status_code
@@ -57,7 +58,7 @@ class AnalyseClient:
     @classmethod
     def search_observations(cls, service_request_guids, *, patient=None,
                             request_id=''):
-        """GET /api/v1/observations from dashboard.pdhc analyse layer.
+        """GET /api/v1/observations from the analyse.pdhc analyse layer.
 
         Gateway pre-computes which service-request guids belong to the
         requested organisation (via contract.pdhc lookups) and asks
