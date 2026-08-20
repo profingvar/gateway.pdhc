@@ -274,21 +274,65 @@ class ReportIngestionService:
             )
 
         # ── Step 7: Contract scope validation ───────────────────────
+        # Partial acceptance: an observation whose (authoritative) concept
+        # is outside the contract return_scope is DROPPED and reported —
+        # the in-scope observations still store and forward, instead of the
+        # whole batch being rejected with 403. Two things stay hard errors:
+        # the obligatory-on-completed completeness check (a contract can't
+        # be completed without its obligatory returns), and the degenerate
+        # case where every observation is out of scope (nothing to accept).
+        rejected_out_of_scope = []
         scope_result = ContractScopeService.fetch_scope(contract_guid)
         if scope_result.valid and scope_result.scope_defined and observations:
-            scope_ok, scope_errors = ContractScopeService.validate_observations(
-                scope_result, observations, status,
-                service_request_guid=service_request_guid,
-            )
-            if not scope_ok:
+            permitted = scope_result.all_permitted_guids
+            kept = []
+            for idx, obs in enumerate(observations):
+                concept_guid = obs.get('concept_guid')
+                if concept_guid and concept_guid not in permitted:
+                    rejected_out_of_scope.append({
+                        'observation_index': idx,
+                        'concept_guid': concept_guid,
+                        'transaction_guid': obs.get('transaction_guid'),
+                        'message': 'Concept not in contract return scope',
+                    })
+                else:
+                    kept.append(obs)
+
+            if rejected_out_of_scope:
                 _audit_rejection(service_request_guid, patient_guid,
                                  provider_org_guid, contract_guid,
-                                 'SCOPE_VIOLATION', scope_errors)
+                                 'SCOPE_VIOLATION_PARTIAL', rejected_out_of_scope)
+            observations = kept
+
+            # Obligatory-on-completed completeness — evaluated against the
+            # ACCEPTED set. Only the completeness error (no per-observation
+            # index) is a hard failure; per-obs scope errors were already
+            # handled above by dropping.
+            if status == 'completed' and scope_result.obligatory_guids:
+                _ok, _errs = ContractScopeService.validate_observations(
+                    scope_result, observations, status,
+                    service_request_guid=service_request_guid,
+                )
+                oblig_errs = [e for e in _errs if 'missing_concept_guids' in e]
+                if oblig_errs:
+                    _audit_rejection(service_request_guid, patient_guid,
+                                     provider_org_guid, contract_guid,
+                                     'SCOPE_VIOLATION', oblig_errs)
+                    raise APIError(
+                        'Missing obligatory concepts for completed status',
+                        code='SCOPE_VIOLATION',
+                        status_code=403,
+                        details=oblig_errs,
+                    )
+
+            # Every observation was out of scope → nothing to accept. Fail
+            # clearly rather than returning an empty acceptance.
+            if not observations and rejected_out_of_scope:
                 raise APIError(
-                    'Observations violate contract scope',
+                    'All observations are outside the contract return scope',
                     code='SCOPE_VIOLATION',
                     status_code=403,
-                    details=scope_errors,
+                    details=rejected_out_of_scope,
                 )
         elif not scope_result.valid and scope_result.error_code == 'CONTRACT_INACTIVE':
             _audit_rejection(service_request_guid, patient_guid,
@@ -418,6 +462,7 @@ class ReportIngestionService:
                 'observation_count': len(observations) if observations else 1,
                 'observations_stored': len(stored),
                 'observations_ignored': len(ignored),
+                'observations_rejected': len(rejected_out_of_scope),
                 'status': status,
                 'payload_hash': payload_hash,
                 'is_late': is_late,
@@ -444,7 +489,11 @@ class ReportIngestionService:
         # (matches the batch-fast-path semantics); mixed → partial. The
         # per-obs `ignored` list is always included when non-empty so
         # providers can re-derive receipt-guids for prior submissions.
-        if stored and not ignored:
+        if rejected_out_of_scope:
+            # Some observations were dropped as out-of-scope → the batch is
+            # partial regardless of the stored/ignored split.
+            action = 'partial'
+        elif stored and not ignored:
             action = 'created'
         elif ignored and not stored:
             action = 'duplicate_ignored'
@@ -462,6 +511,8 @@ class ReportIngestionService:
         }
         if ignored:
             resp['observations_ignored'] = ignored
+        if rejected_out_of_scope:
+            resp['observations_rejected'] = rejected_out_of_scope
         return resp
 
 

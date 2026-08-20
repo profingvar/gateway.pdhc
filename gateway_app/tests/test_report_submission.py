@@ -452,20 +452,16 @@ class TestPatientCrossCheck:
 
 class TestContractScope:
 
-    def test_concept_not_in_scope(self, client, app, db):
-        """SCOPE_VIOLATION fires when the AUTHORITATIVE concept (derived from SR
-        context — gateway overwrites any provider-supplied concept_guid, see the
-        module docstring / report_ingestion §6,§29) is not in the contract's
-        return scope. This models a plan-vs-contract mismatch: the SR
-        transaction names a concept the contract never authorised.
+    def test_out_of_scope_concept_partially_dropped(self, client, app, db):
+        """Partial acceptance: an observation whose AUTHORITATIVE concept
+        (derived from SR context) is not in the contract return scope is
+        DROPPED and reported, while the in-scope observations still store —
+        instead of the whole batch being rejected with 403.
 
-        (Reworked #424: the old version set the *provider-supplied* concept_guid
-        to an out-of-scope value and expected 403 — but that value is now
-        discarded before the scope check, so it can no longer trigger this. See
-        test_provider_supplied_concept_is_ignored for that security property.)
+        Here tx-002 resolves to concept-999 (out of scope) and is dropped;
+        tx-001 -> concept-001 (obligatory, in scope) is kept and stored, so
+        the completed-status obligatory check is also satisfied.
         """
-        # SR context resolves tx-002 -> concept-999, which the contract scope
-        # (concept-001 obligatory + concept-002 optional) does not permit.
         def _sr_ctx_oos(*args, **kwargs):
             resp = _mock_sr_context(*args, **kwargs)
             data = resp.json.return_value
@@ -474,6 +470,32 @@ class TestContractScope:
 
         body = _make_minimal_body()
         patches = _patch_all_upstreams(sr_context_mock=_sr_ctx_oos)
+        with patches[0], patches[1], patches[2], patches[3]:
+            resp = client.post(
+                '/api/v1/provider/report/sr-scope-test',
+                json=body,
+                headers={'X-Provider-Token': 'valid-token'},
+            )
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert data['action'] == 'partial'
+        assert data['observations_stored'] >= 1
+        rejected = data.get('observations_rejected') or []
+        assert any(r.get('concept_guid') == 'concept-999' for r in rejected)
+
+    def test_all_concepts_out_of_scope_still_rejected(self, client, app, db):
+        """Degenerate case: if EVERY observation is out of scope there is
+        nothing to accept, so the request still fails with SCOPE_VIOLATION."""
+        def _sr_ctx_all_oos(*args, **kwargs):
+            resp = _mock_sr_context(*args, **kwargs)
+            data = resp.json.return_value
+            for tx in data['transactions']:
+                tx['concept_guid'] = 'concept-999'
+            return resp
+
+        body = _make_minimal_body()
+        body['status'] = 'in-progress'  # avoid the obligatory-on-completed path
+        patches = _patch_all_upstreams(sr_context_mock=_sr_ctx_all_oos)
         with patches[0], patches[1], patches[2], patches[3]:
             resp = client.post(
                 '/api/v1/provider/report/sr-scope-test',
