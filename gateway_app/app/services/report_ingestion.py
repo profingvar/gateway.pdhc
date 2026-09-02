@@ -480,10 +480,12 @@ class ReportIngestionService:
                       payload_hash=payload_hash,
                       is_late=is_late)
 
-        # Track delivery for request completion (tillägg 7)
+        # Track delivery for request completion (tillägg 7).
+        # `status` carries the provider's explicit lifecycle declaration
+        # (e.g. 'completed') so the SR can be auto-closed on request.pdhc.
         _track_delivery(service_request_guid, patient_guid,
                          provider_org_guid, contract_guid,
-                         len(stored), expires_at, observations)
+                         len(stored), expires_at, observations, status)
 
         # All-stored → action=created; all-ignored → duplicate_ignored
         # (matches the batch-fast-path semantics); mixed → partial. The
@@ -698,8 +700,13 @@ def _audit_rejection(sr_guid, patient_guid, org_guid, contract_guid,
 
 
 def _track_delivery(sr_guid, patient_guid, org_guid, contract_guid,
-                    observations_count, expires_at_iso, observations):
-    """Track delivery progress for request completion (tillägg 7)."""
+                    observations_count, expires_at_iso, observations,
+                    report_status=None):
+    """Track delivery progress for request completion (tillägg 7).
+
+    `report_status` is the provider's explicit lifecycle status on the
+    report ('completed' closes the SR and propagates to request.pdhc).
+    """
     try:
         from .request_completion import RequestCompletionService
 
@@ -709,6 +716,7 @@ def _track_delivery(sr_guid, patient_guid, org_guid, contract_guid,
         RequestCompletionService.track_delivery(
             sr_guid, patient_guid, org_guid, contract_guid,
             observations_count, expires_at_iso, txn_guids,
+            report_status=report_status,
         )
     except Exception as e:
         logger.warning('Failed to track delivery: %s', e)

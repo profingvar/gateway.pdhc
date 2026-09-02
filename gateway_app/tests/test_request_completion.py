@@ -267,3 +267,45 @@ class TestReportTriggersTracking:
             assert srs is not None
             assert srs.status == 'active'
             assert srs.total_observations == 1
+
+
+class TestExplicitCompletion:
+    """Auto-close: an explicit 'completed' report status closes the SR and
+    fires the callback to request.pdhc, regardless of transaction count."""
+
+    def test_explicit_completed_marks_and_notifies(self, db):
+        with patch.object(RequestCompletionService,
+                          '_notify_request_completed') as notify:
+            srs = RequestCompletionService.track_delivery(
+                'sr-xc-001', 'pat-xc-001', 'org-xc-001', 'con-xc-001',
+                observations_count=1, report_status='completed',
+            )
+        assert srs.status == 'completed'
+        assert srs.completed_at is not None
+        notify.assert_called_once_with('sr-xc-001')
+
+    def test_non_completed_status_stays_active(self, db):
+        with patch.object(RequestCompletionService,
+                          '_notify_request_completed') as notify:
+            srs = RequestCompletionService.track_delivery(
+                'sr-xc-002', 'pat-xc-002', 'org-xc-002', 'con-xc-002',
+                observations_count=1, report_status='in-progress',
+            )
+        assert srs.status == 'active'
+        notify.assert_not_called()
+
+    def test_explicit_completed_is_idempotent(self, db):
+        RequestCompletionService.track_delivery(
+            'sr-xc-003', 'pat-xc-003', 'org-xc-003', 'con-xc-003',
+            observations_count=1, report_status='completed',
+        )
+        with patch.object(RequestCompletionService,
+                          '_notify_request_completed') as notify:
+            srs = RequestCompletionService.track_delivery(
+                'sr-xc-003', 'pat-xc-003', 'org-xc-003', 'con-xc-003',
+                observations_count=1, report_status='completed',
+            )
+        assert srs.status == 'completed'
+        # Already completed -> _evaluate_status returns early and the
+        # explicit branch is skipped (status already 'completed').
+        notify.assert_not_called()

@@ -25,7 +25,7 @@ class RequestCompletionService:
     def track_delivery(service_request_guid, patient_guid,
                        provider_org_guid, contract_guid,
                        observations_count, expires_at_iso=None,
-                       transaction_guids=None):
+                       transaction_guids=None, report_status=None):
         """Update delivery tracking after observations are stored.
 
         Args:
@@ -83,8 +83,21 @@ class RequestCompletionService:
             except (ValueError, TypeError):
                 pass
 
-        # Evaluate status
+        # Evaluate status (count-based completion / expiry)
         RequestCompletionService._evaluate_status(srs)
+
+        # Honor the provider's explicit completion declaration. The ingest
+        # pipeline has already enforced obligatory-concept completeness for a
+        # 'completed' report, so an accepted 'completed' report closes the SR
+        # regardless of transaction count (which may be unknown) and fires the
+        # auto-close callback to request.pdhc.
+        if report_status == 'completed' and srs.status != 'completed':
+            srs.status = 'completed'
+            srs.completed_at = datetime.now(timezone.utc)
+            logger.info('ServiceRequest %s marked completed by explicit '
+                        'provider status', srs.service_request_guid)
+            RequestCompletionService._notify_request_completed(
+                srs.service_request_guid)
 
         db.session.commit()
         return srs

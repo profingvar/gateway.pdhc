@@ -201,3 +201,8 @@ All edited files with full path, per Rule 17.
 - gateway.pdhc/gateway_app/docs/gateway_technical_guide.md (Port Allocation section)
 - gateway_app/app/services/contract_scope.py (_fetch_upstream: use public /fhir/Contract/<guid>/scope not /internal/ (proxy sent /internal to web UI → HTML 200 → resp.json() 500); guard resp.json() fail-safe)
 - gateway_app/tests/test_contract_scope.py (+ non-JSON-200 → SERVICE_UNAVAILABLE regression)
+
+## 2026-09-02T11:45:22Z — auto-close: honour explicit 'completed' report status + notify request.pdhc
+- gateway_app/app/services/report_ingestion.py — pass provider report status to _track_delivery
+- gateway_app/app/services/request_completion.py — track_delivery(report_status=); explicit-completed → _notify_request_completed
+- gateway_app/tests/test_request_completion.py — TestExplicitCompletion
