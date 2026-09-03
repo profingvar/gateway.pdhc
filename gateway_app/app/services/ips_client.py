@@ -63,10 +63,12 @@ class IpsClient:
         token: str | None = None,
         service_key: str | None = None,
         base_url: str | None = None,
+        api_key: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ):
         self.token = token
         self.service_key = service_key
+        self.api_key = api_key or os.environ.get("IPS_API_KEY", "") or None
         self.base_url = (
             base_url or os.environ.get("IPS_BASE_URL", "")
         ).rstrip("/")
@@ -74,10 +76,15 @@ class IpsClient:
 
     def _headers(self) -> dict:
         h = {"Accept": "application/json"}
+        # ips.pdhc reads ONLY the Authorization header (Bearer or ApiKey);
+        # X-Service-Key is silently ignored (infra_ips_auth_header_scheme), so
+        # the block fetch must present a registered ips ApiKey to work.
         if self.token:
             h["Authorization"] = f"Bearer {self.token}"
+        elif self.api_key:
+            h["Authorization"] = f"ApiKey {self.api_key}"
         if self.service_key:
-            h["X-Service-Key"] = self.service_key
+            h["X-Service-Key"] = self.service_key  # harmless; ignored by ips
         return h
 
     def fetch_active_blocks(self, patient_guid: str) -> list[Block]:
@@ -191,7 +198,10 @@ def _default_client() -> IpsClient:
     scoped, not caller-scoped)."""
     return IpsClient(
         service_key=current_app.config.get("GATEWAY_PDHC_SERVICE_KEY") or None,
-        base_url=current_app.config.get("IPS_BASE_URL") or None,
+        base_url=current_app.config.get("IPS_BASE_URL")
+        or os.environ.get("IPS_BASE_URL") or None,
+        api_key=current_app.config.get("IPS_API_KEY")
+        or os.environ.get("IPS_API_KEY") or None,
     )
 
 
