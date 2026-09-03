@@ -215,3 +215,8 @@ All edited files with full path, per Rule 17.
 - gateway_app/app/cli.py — flask backfill-cdr-patients (dry-run default)
 - gateway_app/tests/test_patient_demographics.py (new)
 Deployed to prod. Backfill wrote Erik Andersson (612a2995) + Per Bergström (8bb57ce2).
+
+## 2026-09-03 — gateway ips auth fix (observations-read spärr)
+- gateway_app/app/services/ips_client.py — Authorization: ApiKey support (ips ignores X-Service-Key)
+- SERVER .env (not in git): IPS_BASE_URL=https://ips.pdhc.se + IPS_API_KEY (reused request.pdhc's registered ips key NP_cT6G4…)
+Was failing open (401). Read-path defense-in-depth only. NOTE: fetch_active_blocks uses the /blocks LIST (relationship-gated for service accounts) — when active blocks start being used, verify it returns them or switch to /blocks/check (like request.pdhc/analyse). No active blocks exist in ips yet to test.
