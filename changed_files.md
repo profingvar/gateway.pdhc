@@ -206,3 +206,12 @@ All edited files with full path, per Rule 17.
 - gateway_app/app/services/report_ingestion.py — pass provider report status to _track_delivery
 - gateway_app/app/services/request_completion.py — track_delivery(report_status=); explicit-completed → _notify_request_completed
 - gateway_app/tests/test_request_completion.py — TestExplicitCompletion
+
+## 2026-09-03 — sync patient demographics ips→CDR1 at validated ingest
+- gateway_app/app/services/sr_context.py — expose patient_name/patient_birth_date
+- gateway_app/app/services/patient_sync.py (new) — idempotent, fail-soft ensure_cdr_patient
+- gateway_app/app/services/report_ingestion.py — call ensure_cdr_patient after full validation (requestGUID gate)
+- gateway_app/app/services/cdr_client.py — write_patient (POST /api/v1/fhir/Patient)
+- gateway_app/app/cli.py — flask backfill-cdr-patients (dry-run default)
+- gateway_app/tests/test_patient_demographics.py (new)
+Deployed to prod. Backfill wrote Erik Andersson (612a2995) + Per Bergström (8bb57ce2).
