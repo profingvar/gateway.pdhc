@@ -36,6 +36,17 @@ class SRContextResult:
         return self._data.get('contract_guid', '')
 
     @property
+    def patient_name(self):
+        """Display name resolved from ips by request.pdhc (may be absent —
+        the patient stays pseudonymous when ips doesn't know them)."""
+        return self._data.get('patient_name') or ''
+
+    @property
+    def patient_birth_date(self):
+        """ISO birthDate resolved from ips by request.pdhc, or ''."""
+        return self._data.get('patient_birth_date') or ''
+
+    @property
     def requesting_org_guid(self):
         # #294 RFC plan §4 / #301 (2026-06-28): canonical name is
         # `requesting_org_guid`. request.pdhc still emits the legacy

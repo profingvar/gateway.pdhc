@@ -85,6 +85,39 @@ class CdrClient:
         raise CdrUnavailable(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
     @classmethod
+    def write_patient(cls, patient_resource, request_id, session_id=None):
+        """Upsert a Patient resource into cdr1's FHIR live store.
+
+        POST /api/v1/fhir/Patient with the resource ``id`` set to the patient
+        guid — cdr1 routes an id-bearing POST through update-as-create, so the
+        live ``patient`` row's guid equals the patient guid (which is what the
+        care-delivery patient list joins observations against). Idempotent:
+        re-posting updates the same row. Same auth scheme as deliver_one.
+
+        Returns the parsed JSON body on success. Raises CdrRejected on 4xx,
+        CdrUnavailable on 5xx / network errors.
+        """
+        url = f"{cls._base_url()}/api/v1/fhir/Patient"
+        timeout = current_app.config.get('CDR_TIMEOUT_SECONDS', 30)
+        try:
+            resp = requests.post(
+                url, json=patient_resource,
+                headers=cls._headers(request_id, session_id),
+                timeout=timeout,
+            )
+        except requests.RequestException as e:
+            raise CdrUnavailable(str(e)) from e
+
+        if 200 <= resp.status_code < 300:
+            try:
+                return resp.json()
+            except ValueError:
+                return {}
+        if 400 <= resp.status_code < 500:
+            raise CdrRejected(resp.status_code, resp.text)
+        raise CdrUnavailable(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+    @classmethod
     def deliver_batch(cls, items, request_id):
         """POST up to 100 observations in one call.
 

@@ -45,6 +45,7 @@ from ..errors import APIError
 from .grant_validation import GrantValidationService
 from .sr_context import SRContextService
 from .contract_scope import ContractScopeService
+from .patient_sync import ensure_cdr_patient
 from .observation_validator import ObservationValidator
 from .sso_service import current_session_id
 
@@ -153,6 +154,18 @@ class ReportIngestionService:
                 'Contract GUID does not match grant',
                 code='CONTRACT_MISMATCH', status_code=403,
             )
+
+        # ── Ensure patient demographics in cdr1 (fail-soft, idempotent) ─
+        # The delivery is now fully validated (SR + patient + grant + contract
+        # all matched — the request-GUID round-trip is the trust anchor). The
+        # patient REFERENCE is the SR's patient_guid; the demographic DATA came
+        # from ips via the SR context. A patient ips doesn't know stays
+        # pseudonymous; a write failure never affects the receipt below.
+        ensure_cdr_patient(
+            patient_guid, sr_context.patient_name,
+            sr_context.patient_birth_date,
+            session_id=current_session_id(),
+        )
 
         # Build transaction lookup map
         txn_map = sr_context.transaction_map()
