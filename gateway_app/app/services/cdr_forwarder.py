@@ -248,6 +248,15 @@ def _build_payload(log_row):
             'transaction_guid': log_row.transaction_guid,
             'contract_guid': log_row.contract_guid,
             'provider_org_guid': log_row.provider_org_guid,
+            # #666: the authoring organisation, accepted by cdr #665. NULL
+            # when the submitter did not declare one — cdr stores NULL rather
+            # than defaulting, so a guess never becomes indistinguishable
+            # from a declared fact.
+            # getattr, not attribute access: the forwarder drains a QUEUE, so
+            # it can legitimately meet a row enqueued before the column
+            # existed — during a rolling deploy, or a backlog. Matching the
+            # builder, which is defensive for the same reason.
+            'author_org_guid': getattr(log_row, 'author_org_guid', None),
         },
     }
 

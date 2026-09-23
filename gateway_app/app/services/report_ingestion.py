@@ -69,6 +69,10 @@ class ReportIngestionService:
         grant_token = body.get('grant_token')
         status = body.get('status', 'in-progress')
         report_payload = body.get('report_payload')
+        # #666: the submitter MAY declare which organisation authored this
+        # data, when that is not itself. Optional — every existing integration
+        # keeps working unchanged and simply leaves it NULL.
+        report_author_org_guid = body.get('author_org_guid')
 
         # Backward compat: accept patient/org/contract from body for cross-check.
         # #294/#301: canonical wire key is `provider_org_guid`; legacy
@@ -430,6 +434,12 @@ class ReportIngestionService:
                     concept_guid=obs.get('concept_guid'),
                     contract_guid=contract_guid,
                     provider_org_guid=provider_org_guid,
+                    # #666: declared per observation, else per report, else
+                    # NULL. Deliberately NOT defaulted to the provider: a
+                    # guess written into the row becomes indistinguishable
+                    # from a value the submitter actually declared.
+                    author_org_guid=(obs.get('author_org_guid')
+                                     or report_author_org_guid),
                     payload_hash=payload_hash,
                     dedup_key=dedup_key,
                     received_at=datetime.now(timezone.utc),
@@ -450,6 +460,7 @@ class ReportIngestionService:
                 service_request_guid=service_request_guid,
                 contract_guid=contract_guid,
                 provider_org_guid=provider_org_guid,
+                author_org_guid=report_author_org_guid,   # #666
                 payload_hash=payload_hash,
                 received_at=datetime.now(timezone.utc),
                 fhir_observation_json=report_payload,

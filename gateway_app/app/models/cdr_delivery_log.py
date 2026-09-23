@@ -49,6 +49,12 @@ class CdrDeliveryLog(db.Model):
     transaction_guid = db.Column(db.String(36), nullable=True, index=True)
     contract_guid = db.Column(db.String(36), nullable=True)
     provider_org_guid = db.Column(db.String(36), nullable=True)
+    # #666: who CREATED the observation, when that differs from who submitted
+    # it. provider_org_guid is AUTHENTICATED — it comes from the PAT and the
+    # submitter cannot falsify it. author_org_guid can only be DECLARED,
+    # because only the submitter knows who authored. NULL means the submitter
+    # did not say, never "same as provider" — see cdr #665 / analyse ADR-0006.
+    author_org_guid = db.Column(db.String(36), nullable=True, index=True)
     received_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     # Full FHIR R5 Observation resource. After SSOT phase 6 (#285)

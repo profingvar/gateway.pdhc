@@ -217,6 +217,29 @@ def build_fhir_observation(row, sr_contexts=None, contract_scopes=None):
             }
         })
 
+    # Author organization (#666) — a DISTINCT extension, NOT a change to
+    # what `performer` means.
+    #
+    # FHIR's `performer` is "who is responsible for the observation", which is
+    # semantically the AUTHOR — so this platform carrying the SUBMITTER there
+    # is arguably wrong. It is left alone anyway: cdr's backfill CLI reads
+    # performer back into provider_org_guid, and external partners may read it
+    # too. Changing what an existing field MEANS is a silent breaking change,
+    # and a new extension costs nothing.
+    #
+    # Recorded plainly so nobody rediscovers it the hard way: ON THIS PLATFORM
+    # `performer` CARRIES THE SUBMITTER, not the author.
+    if getattr(row, 'author_org_guid', None):
+        extensions.append({
+            'url': 'urn:pdhc:fhir:extension:author-organization',
+            'valueReference': {
+                'reference': f'https://sso.pdhc.se/api/organisations/{row.author_org_guid}',
+                'type': 'Organization',
+                'display': 'Author Organization',
+                'identifier': {'value': row.author_org_guid},
+            }
+        })
+
     # Requesting organization (from contract scope)
     req_org = (contract_scope.get('parties') or {}).get('requesting_org_guid')
     if req_org:

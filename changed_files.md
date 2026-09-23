@@ -220,3 +220,11 @@ Deployed to prod. Backfill wrote Erik Andersson (612a2995) + Per Bergström (8bb
 - gateway_app/app/services/ips_client.py — Authorization: ApiKey support (ips ignores X-Service-Key)
 - SERVER .env (not in git): IPS_BASE_URL=https://ips.pdhc.se + IPS_API_KEY (reused request.pdhc's registered ips key NP_cT6G4…)
 Was failing open (401). Read-path defense-in-depth only. NOTE: fetch_active_blocks uses the /blocks LIST (relationship-gated for service accounts) — when active blocks start being used, verify it returns them or switch to /blocks/check (like request.pdhc/analyse). No active blocks exist in ips yet to test.
+
+## 2026-09-23 — #666 author_org_guid (the population half of cdr #665)
+- gateway_app/app/models/cdr_delivery_log.py — author_org_guid column
+- gateway_app/app/services/report_ingestion.py — accept it, per-obs then per-report
+- gateway_app/app/services/cdr_forwarder.py — forward it in clinical_context
+- gateway_app/app/services/fhir_observation_builder.py — author-organization extension
+- gateway_app/migrations/versions/b2c3d4e5f6a7_add_author_org.py (new)
+- gateway_app/tests/test_author_org_666.py (new, 8)

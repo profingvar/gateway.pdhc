@@ -701,3 +701,45 @@ Operator: run `flask db upgrade` to add the column at next gateway deploy.
 Note: 10 pre-existing test failures in this repo (test_sso_auth.py
 auth-fixture drift + one stale contract-scope test + a test-isolation
 state-leak) are unrelated to X2 — filed as cleanup #424.
+
+---
+
+## 2026-09-23 — #666: the submitter may declare who AUTHORED the data
+
+312 tests pass (304 + 8). Not deployed. The population half of cdr #665, which
+is live on cdr1.
+
+The gateway knows who **submitted** a report — the PAT is authenticated and
+the submitter cannot lie about it. It cannot know who **authored** it; only
+the submitter knows that. Everything here follows from that asymmetry:
+`author_org_guid` is **declared**, optional, and NULL when unstated.
+
+**No backfill and no default.** `author = provider` would be a guess, and once
+written a guess is indistinguishable from a value the submitter actually
+declared. Same decision as cdr #665, for the same reason.
+
+**`performer` was NOT repurposed, and this is the judgement call in the
+ticket.** FHIR's `performer` means "who is responsible for the observation" —
+semantically the author — so this platform carrying the *submitter* there is
+arguably wrong, and the ticket asked me to reconsider it.
+
+I checked the consumers first, as the ticket said to. cdr's backfill CLI reads
+`performer` back into `provider_org_guid`, and external partners may read it
+too. Changing what an existing field *means* is a silent breaking change:
+nothing errors, the values simply start meaning something else. A new
+extension costs nothing, so the author gets
+`urn:pdhc:fhir:extension:author-organization` alongside the other pdhc
+extensions, and a comment in the builder records plainly that **on this
+platform `performer` carries the submitter**.
+
+**A bug the tests caught.** The forwarder read `log_row.author_org_guid`
+directly where the builder used `getattr`. That broke on stub rows — and it
+would have broken in production too, because the forwarder drains a **queue**
+and can legitimately meet a row enqueued before the column existed, during a
+rolling deploy or from a backlog. Both are defensive now, for that reason
+rather than to make a test pass.
+
+**Ordering for deployment:** cdr #665 is already live on cdr1, so the CDR will
+accept the field the moment the gateway starts sending it. Nothing breaks if
+the gateway is deployed later — the field is simply absent, which is the same
+as today.
