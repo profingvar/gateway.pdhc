@@ -228,3 +228,5 @@ Was failing open (401). Read-path defense-in-depth only. NOTE: fetch_active_bloc
 - gateway_app/app/services/fhir_observation_builder.py — author-organization extension
 - gateway_app/migrations/versions/b2c3d4e5f6a7_add_author_org.py (new)
 - gateway_app/tests/test_author_org_666.py (new, 8)
+
+## 2026-09-23 — #666 deployed (4 files + migration; observations.py / analyse_client.py left, prose-only #540 drift)

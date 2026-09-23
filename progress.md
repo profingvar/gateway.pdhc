@@ -743,3 +743,33 @@ rather than to make a test pass.
 accept the field the moment the gateway starts sending it. Nothing breaks if
 the gateway is deployed later — the field is simply absent, which is the same
 as today.
+
+---
+
+## 2026-09-23 — #666 DEPLOYED. The author_org chain is live end to end.
+
+gateway health 200, alembic head `b2c3d4e5f6a7`,
+`cdr_delivery_log.author_org_guid` and its index present. cdr1 still 200.
+
+**Verified in the running containers, not inferred:** a row carrying
+`author_org_guid` produces `performer = org-SUBMITTER` (unchanged) *and* an
+`author-organization` extension carrying `org-AUTHOR`; the forwarder sends the
+field in `clinical_context`; cdr1's ingest pipeline accepts it. The pair
+#665/#666 now works end to end.
+
+**The divergence check found two files again**, and again they were not mine:
+`api/observations.py` and `services/analyse_client.py`, both carrying **#540**
+(analyse-pull repointed from dashboard.pdhc to analyse.pdhc). Local git has
+the change; production does not.
+
+Inspected before deciding: the differences are **prose only** — both versions
+use `ANALYSE_BASE_URL`, and production has it set to
+`http://host.docker.internal:9110`, which *is* analyse.pdhc. **So #540 is
+already live via configuration; only the comments are stale.** Left untouched,
+because a minimal deploy is easier to reason about and to roll back, and prose
+drift is harmless.
+
+That is two deploys today where checksumming the tree found unexpected
+divergence. On cdr1 it mattered — a wholesale copy would have shipped an
+authorisation change. Here it did not. The check is worth running either way,
+because you cannot tell which case you are in until you look.
