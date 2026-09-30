@@ -773,3 +773,62 @@ That is two deploys today where checksumming the tree found unexpected
 divergence. On cdr1 it mattered — a wholesale copy would have shipped an
 authorisation change. Here it did not. The check is worth running either way,
 because you cannot tell which case you are in until you look.
+
+## #708 — sibling smoke for gateway.pdhc (2026-09-30)
+
+`deploy/smoke_siblings.py`, run inside the container:
+
+```
+docker exec gateway_pdhc_app python deploy/smoke_siblings.py
+docker exec gateway_pdhc_app python deploy/smoke_siblings.py --json
+```
+
+Read-only, exit 0 only if everything passed. **All 9 checks pass** — gateway,
+the busiest boundary on the platform, is correctly wired to all six siblings.
+
+### Why a read-only smoke can test write endpoints
+
+Most of what gateway does to a sibling is a write: forward an observation to
+cdr1, validate a grant, notify a completion. A smoke must not perform those.
+So for each it distinguishes the two answers that actually matter:
+
+- **401 / 403** — the credential is wrong. A real finding.
+- **a structured refusal** — the boundary works and the sibling said no.
+
+"Cannot reach request.pdhc" and "request.pdhc rejected my service key" look
+identical in a log and have completely different fixes. Measured results:
+grant/validate → 400, completion → 404, validate-token → 401 (correct: that
+route is unauthenticated by design, so rejecting a bogus token *is* it
+working), cdr1 → 200, analyse → 400 carrying analyse's own error body.
+
+### Two guards against the smoke itself being wrong
+
+**Paths are verified against the clients.** `PATHS` maps each probed path to
+the client module that must contain it, and the first check asserts it. That
+exists because the first analyse smoke tested `fhir/Observation` — a path I
+invented — and would have reported a green boundary no code uses.
+
+**Config comes from `create_app()`**, never from a literal, so the smoke
+cannot pass while production is misconfigured.
+
+### Three mistakes of mine, all caught by running it
+
+1. I checked `app.config["IPS_BASE_URL"]` and reported it missing. It is
+   deliberately env-resolved: `ips_client` does
+   `config.get(...) or os.environ.get(...)` at both the call site and the
+   constructor. The code is intentionally robust; my check was too narrow. I
+   was one step from filing a defect that does not exist.
+2. I sent `Authorization: Bearer <GATEWAY_PDHC_SERVICE_KEY>` to ips and got a
+   401 that looked like a finding. The client presents
+   `ApiKey <IPS_API_KEY>` — a service key is not an ips credential. Fixed by
+   driving `_default_client()` instead of hand-rolling headers, so the smoke
+   cannot disagree with production about which credential is correct.
+3. The analyse check passed on a bare non-401, which a proxy error would also
+   satisfy. Tightened to require analyse's own JSON body.
+
+### Worth noting
+
+`IPS_BASE_URL` and `IPS_API_KEY` are the only sibling settings gateway does
+not register in `app.config` — they are resolved from the environment. It
+works and is deliberate, but it is inconsistent with the other five and is
+the kind of difference that misleads a reader. Not filed; noted here.
