@@ -230,3 +230,6 @@ Was failing open (401). Read-path defense-in-depth only. NOTE: fetch_active_bloc
 - gateway_app/tests/test_author_org_666.py (new, 8)
 
 ## 2026-09-23 — #666 deployed (4 files + migration; observations.py / analyse_client.py left, prose-only #540 drift)
+- gateway_app/app/services/cdr_forwarder.py — EDIT (#776). _build_payload puts plan_definition_guid, requesting_org_guid and requester_user_guid into the clinical_context block; they were already fetched from request.pdhc and dropped.
+- gateway_app/app/services/sr_context.py — EDIT (#776). SRContextResult gains plan_definition_guid and requester_user_guid properties.
+- gateway_app/tests/test_fhir_observation_builder.py — EDIT (#776). 5 tests on the clinical_context block, including the context-outage guarantee.

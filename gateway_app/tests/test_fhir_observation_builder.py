@@ -117,3 +117,85 @@ def test_forwarder_envelope_has_observation_block():
     assert payload["observation"]["value"] == 72.5
     assert payload["observation"]["response_type"] == "numeric"
     assert "fhir_resource" in payload  # projection kept for back-compat
+
+
+# ---- #776: the clinical_context block the CDR actually stores -------------
+#
+# #490 made the forwarder FETCH the SR context and hand it to the FHIR builder,
+# which is why `test_forwarder_restores_provenance` above passes. But the
+# `clinical_context` dict — the block cdr reads to populate its ClinicalContext
+# row — never carried those fields, so cdr1 recorded plan_definition_guid and
+# requesting_org_guid on 0 of 7,416 rows while the values sat in the fetched
+# response. Asserting on the FHIR projection alone did not catch it; these
+# assert on the block cdr stores.
+
+def _log(**kw):
+    base = dict(
+        guid="l776", concept_guid="c1", patient_guid="p1",
+        service_request_guid="sr1", contract_guid="k1", provider_org_guid="o1",
+        transaction_guid="t1", received_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        fhir_observation_json={"value": 5.4, "response_type": "numeric"})
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def _ctx(**kw):
+    data = {"plan_definition_guid": "pd1", "requesting_org_guid": "ro1",
+            "requester_user_guid": "ru1", "goals": []}
+    data.update(kw)
+    return SRContextResult(found=True, data=data)
+
+
+def test_clinical_context_block_carries_the_fetched_provenance(monkeypatch):
+    monkeypatch.setattr(fwd.SRContextService, "fetch", staticmethod(lambda g: _ctx()))
+    cc = fwd._build_payload(_log())["clinical_context"]
+    assert cc["plan_definition_guid"] == "pd1"
+    assert cc["requesting_org_guid"] == "ro1"
+    assert cc["requester_user_guid"] == "ru1"
+
+
+def test_the_existing_clinical_context_fields_are_unchanged(monkeypatch):
+    """Additive only — the keys cdr already relies on must keep their values,
+    so gateway and cdr can be deployed in either order."""
+    monkeypatch.setattr(fwd.SRContextService, "fetch", staticmethod(lambda g: _ctx()))
+    cc = fwd._build_payload(_log())["clinical_context"]
+    assert cc["service_request_guid"] == "sr1"
+    assert cc["transaction_guid"] == "t1"
+    assert cc["contract_guid"] == "k1"
+    assert cc["provider_org_guid"] == "o1"
+
+
+def test_a_context_outage_still_delivers_the_observation(monkeypatch):
+    """THE constraint: request.pdhc being down must degrade provenance, never
+    block clinical data reaching the CDR."""
+    def boom(g):
+        raise RuntimeError("request.pdhc down")
+    monkeypatch.setattr(fwd.SRContextService, "fetch", staticmethod(boom))
+    payload = fwd._build_payload(_log())          # must not raise
+    assert payload["fhir_resource"]["valueQuantity"]["value"] == 5.4
+    cc = payload["clinical_context"]
+    assert cc["plan_definition_guid"] is None     # absent, not invented
+    assert cc["requesting_org_guid"] is None
+    assert cc["service_request_guid"] == "sr1"    # what we DID know survives
+
+
+def test_a_missing_field_is_None_not_an_empty_string(monkeypatch):
+    """cdr stores NULL rather than defaulting (#665). An empty string would be a
+    value, and 'not declared' would become indistinguishable from 'declared as
+    blank'."""
+    monkeypatch.setattr(fwd.SRContextService, "fetch",
+                        staticmethod(lambda g: _ctx(plan_definition_guid="",
+                                                    requester_user_guid="")))
+    cc = fwd._build_payload(_log())["clinical_context"]
+    assert cc["plan_definition_guid"] is None
+    assert cc["requester_user_guid"] is None
+    assert cc["requesting_org_guid"] == "ro1"
+
+
+def test_a_delivery_with_no_service_request_still_builds(monkeypatch):
+    """The forwarder drains a queue; a row can legitimately have no SR."""
+    monkeypatch.setattr(fwd.SRContextService, "fetch",
+                        staticmethod(lambda g: _ctx()))
+    cc = fwd._build_payload(_log(service_request_guid=None))["clinical_context"]
+    assert cc["plan_definition_guid"] is None
+    assert cc["service_request_guid"] is None

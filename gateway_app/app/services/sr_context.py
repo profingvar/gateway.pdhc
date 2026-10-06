@@ -85,6 +85,21 @@ class SRContextResult:
     def goals(self):
         return self._data.get('goals', [])
 
+    @property
+    def plan_definition_guid(self):
+        """The PlanDefinition the ServiceRequest was raised from (#776).
+
+        request.pdhc has always returned this; the CDR forwarder fetched it and
+        then left it out of the clinical_context block, so cdr1 recorded it on
+        0 of 7,416 rows while the value sat in the fetched response.
+        """
+        return self._data.get('plan_definition_guid', '')
+
+    @property
+    def requester_user_guid(self):
+        """The user who raised the ServiceRequest (#776). Same story."""
+        return self._data.get('requester_user_guid', '')
+
     def transaction_map(self):
         """Build {transaction_guid: transaction_dict} for fast lookup."""
         return {

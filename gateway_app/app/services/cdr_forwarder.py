@@ -220,12 +220,23 @@ def _build_payload(log_row):
     # builder; previously this was None so ALL of it was dropped from CDR1.
     # A context-fetch failure must NOT block delivery — forward without it.
     sr_contexts, contract_scopes = {}, {}
+    # #776: the three fields below were ALREADY being fetched here and then
+    # dropped before the clinical_context block was built, so cdr1 recorded
+    # plan_definition_guid and requesting_org_guid on 0 of 7,416 rows while the
+    # values sat in this very response. cdr's ClinicalContext has mapped all
+    # three since #302 — it was waiting for a sender.
+    sr_plan_definition_guid = None
+    sr_requesting_org_guid = None
+    sr_requester_user_guid = None
     sr_guid = log_row.service_request_guid
     if sr_guid:
         try:
             ctx = SRContextService.fetch(sr_guid)
             if ctx.found:
                 sr_contexts = {sr_guid: ctx.as_builder_context()}
+                sr_plan_definition_guid = ctx.plan_definition_guid or None
+                sr_requesting_org_guid = ctx.requesting_org_guid or None
+                sr_requester_user_guid = ctx.requester_user_guid or None
                 if log_row.contract_guid and ctx.requesting_org_guid:
                     contract_scopes = {log_row.contract_guid: {
                         'parties': {'requesting_org_guid': ctx.requesting_org_guid}}}
@@ -257,6 +268,15 @@ def _build_payload(log_row):
             # existed — during a rolling deploy, or a backlog. Matching the
             # builder, which is defensive for the same reason.
             'author_org_guid': getattr(log_row, 'author_org_guid', None),
+            # #776. Fetched above from request.pdhc, not stored on the delivery
+            # log — `cdr_delivery_log` has no plan_definition_guid column — so a
+            # delivery retried after its ServiceRequest is archived legitimately
+            # carries None here. cdr stores NULL rather than defaulting, the
+            # same rule #665 applied to author_org_guid: an absent fact must not
+            # become indistinguishable from a declared one.
+            'plan_definition_guid': sr_plan_definition_guid,
+            'requesting_org_guid': sr_requesting_org_guid,
+            'requester_user_guid': sr_requester_user_guid,
         },
     }
 

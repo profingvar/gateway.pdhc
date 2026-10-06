@@ -832,3 +832,57 @@ cannot pass while production is misconfigured.
 not register in `app.config` — they are resolved from the environment. It
 works and is deliberate, but it is inconsistent with the other five and is
 the kind of difference that misleads a reader. Not filed; noted here.
+
+## 2026-10-06 — #776 stop dropping the provenance we already fetch
+
+The CDR recorded `plan_definition_guid` and `requesting_org_guid` on **0 of
+7,416** rows. The cause was not a missing integration: #490 already has the
+forwarder call `SRContextService.fetch()` against request.pdhc and receive both
+values. They went into the FHIR projection and into `contract_scopes`, and were
+then left out of the `clinical_context` dict — the one block cdr reads to build
+its ClinicalContext row.
+
+cdr's ingest has mapped `plan_definition_guid`, `requesting_org_guid` and
+`requester_user_guid` since #302, aliases included. It was waiting for a sender.
+
+So this is gateway-only: no cdr change, no migration, no dependency on #769.
+
+Three fields added to the block, plus two properties on `SRContextResult`.
+`or None` on each, because cdr stores NULL rather than defaulting (#665) and an
+empty string would make "not declared" indistinguishable from "declared blank".
+
+### Why the existing tests did not catch it
+`test_forwarder_restores_provenance` asserts on the FHIR projection — `basedOn`
+carries the PlanDefinition reference, so it passed throughout. Nothing asserted
+on the `clinical_context` block at all. The five new tests do, and four of them
+fail against the pre-#776 code; verified by reverting the three lines.
+
+### The constraint: a request.pdhc outage must not block clinical data
+The `except Exception` around the fetch is unchanged and now covered by a test:
+on an outage the observation still delivers, the three new fields are `None`,
+and `service_request_guid`/`transaction_guid` — which come from the log row, not
+the fetch — still arrive. Degrading provenance is right; blocking delivery is not.
+
+Also unchanged: `getattr` for queue rows enqueued before a column existed, and
+additive keys only, so gateway and cdr deploy in either order.
+
+### Live verification
+Built a payload from a real delivered row on the running gateway:
+
+    plan_definition_guid   febf8ec1-…   (Asthma home monitoring)
+    requesting_org_guid    7d55624c-…   (UAS — a CLINIC)
+    requester_user_guid    2cb56f37-…
+
+Worth noting `provider_org_guid` on the same row is `7a69ab02` (MeditunerAB, a
+provider). The two are different organisations playing different roles, and the
+CDR now records both — which is the distinction #768 turns on.
+
+`CdrDeliveryLog` unchanged at delivered 354 · skipped 6 · failed 0 · pending 0.
+Gateway health 200, sibling smoke 9/9, platform 39 containers 0 unhealthy.
+316 tests pass (was 311). Predeploy backup
+`~/backups/predeploy/gateway.pdhc/20261006T144311Z` with the rollback image id.
+
+**Note `cdr_delivery_log` has no `plan_definition_guid` column**, so the value
+exists only during the live fetch: a delivery retried after its ServiceRequest
+is archived will carry NULL, honestly. Storing it on the log row would make
+retries self-contained — a candidate follow-up, not done here.
