@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json as _json
 import pathlib
+import re
 import sys
 import time
 
@@ -102,14 +103,44 @@ def main(as_json: bool = False) -> int:
         # ── the paths this script probes must be the ones the code builds ──
         @check("paths: every probed path appears in its client module")
         def _():
-            root = pathlib.Path(__file__).resolve().parent.parent / "app" / "services"
+            # #804: this was `path not in f.read_text()` -- a bare substring
+            # check, which CANNOT CATCH THE BUG IT EXISTS FOR. The docstring
+            # above says the guard was written because a smoke once probed
+            # `fhir/Observation` instead of `/api/v1/fhir/Observation`; a
+            # substring check passes that, because the truncated form IS a
+            # substring of the correct one. The guard was green for exactly
+            # the defect it was meant to stop.
+            #
+            # Anchored now: in every client the path starts immediately after
+            # the base-URL placeholder or an opening quote, so requiring one
+            # of } " ' before it rejects a truncated prefix that merely ends
+            # the same way. Verified by introducing the truncation and
+            # watching this check fail -- which the substring version did not.
+            # #804: the image lays the app out as /app/app/services while a
+            # checkout has it at <repo>/gateway_app/app/services, so a single
+            # hardcoded relative path only resolves in one of the two. It
+            # resolved in the image, so this check has always passed there and
+            # reported every client "missing" from a developer's checkout --
+            # a failure rather than a false pass, but it meant nobody could
+            # run the guard before deploying, which is when it is useful.
+            here = pathlib.Path(__file__).resolve().parent.parent
+            root = next(
+                (c for c in (here / "app" / "services",
+                             here / "gateway_app" / "app" / "services")
+                 if c.is_dir()),
+                here / "app" / "services")
             missing = []
             for path, mod in PATHS.items():
                 f = root / mod
-                if not f.exists() or path not in f.read_text():
-                    missing.append(f"{path} not in {mod}")
-            return (not missing), ("all 5 verified against the clients"
-                                   if not missing else "; ".join(missing))
+                if not f.exists():
+                    missing.append(f"{mod} is missing")
+                    continue
+                if not re.search(r"""[}"']""" + re.escape(path), f.read_text()):
+                    missing.append(
+                        f"{path} does not START a URL in {mod}")
+            return (not missing), (
+                f"all {len(PATHS)} anchored to a URL boundary in their clients"
+                if not missing else "; ".join(missing))
 
         # ── configuration, per boundary ──
         @check("config: every sibling URL and key is set")
