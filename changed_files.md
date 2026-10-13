@@ -234,3 +234,4 @@ Was failing open (401). Read-path defense-in-depth only. NOTE: fetch_active_bloc
 - gateway_app/app/services/sr_context.py — EDIT (#776). SRContextResult gains plan_definition_guid and requester_user_guid properties.
 - gateway_app/tests/test_fhir_observation_builder.py — EDIT (#776). 5 tests on the clinical_context block, including the context-outage guarantee.
 /Users/martiningvar/T7_sidewinder/gateway.pdhc/deploy/smoke_siblings.py
+- 2026-10-13 gateway_app/config.py — #816: SESSION_COOKIE_SECURE/HTTPONLY/SAMESITE
