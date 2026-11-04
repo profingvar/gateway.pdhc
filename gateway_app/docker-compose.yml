@@ -23,7 +23,14 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-gateway_pdhc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-gateway_pdhc_db}
+      # +psycopg2 is EXPLICIT and load-bearing (#711, #930). This file carried a
+      # bare `postgresql://` while the DEPLOYED compose already said +psycopg2, so
+      # the repo copy had drifted from production. Measured in the running container
+      # 2026-11-04: SQLAlchemy 2.1.3 (pinned), psycopg v3 ABSENT, psycopg2 present —
+      # and SQLAlchemy 2.1 resolves a bare scheme to psycopg v3. So a
+      # `docker-compose up -d --build` run from THIS file would have crash-looped
+      # gateway. #930 carries the sweep: 7 other repo composes are still bare.
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-gateway_pdhc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-gateway_pdhc_db}
     ports:
       - "127.0.0.1:9050:9050"
     depends_on:

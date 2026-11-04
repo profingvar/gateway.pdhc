@@ -24,6 +24,7 @@ from ..extensions import db
 from ..models import CdrDeliveryLog, AuditLog
 from .cdr_client import CdrClient, CdrRejected, CdrUnavailable
 from .fhir_observation_builder import build_fhir_observation, build_canonical_observation
+from .response_types import UnknownResponseType
 from .sr_context import SRContextService
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,32 @@ def run_forwarding_cycle(app):
             try:
                 if _deliver_one(log):
                     delivered += 1
+            except UnknownResponseType as e:
+                # #871 + #833: a response_type that was DECLARED and names
+                # nothing is a PERMANENT condition. Routing it to the generic
+                # handler below would retry it MAX_ATTEMPTS times with
+                # exponential backoff and then fail anyway — telling an
+                # operator "transient" about a configuration error, which is
+                # the exact mistake xlate's client made (#833).
+                #
+                # Terminal is also the safe direction: the alternative to
+                # refusing is writing a wrong-typed clinical value, and before
+                # #871 that is what happened — an unrecognised type reached the
+                # builder's blind-float() branch.
+                logger.error("Forwarding %s refused: %s", log.guid, e)
+                _mark_failed_terminal(log, str(e))
+                db.session.add(AuditLog(
+                    event_type='cdr.delivery.failure',
+                    actor_guid='gateway.pdhc',
+                    data_subject_guid=log.patient_guid,
+                    resource_guid=log.guid,
+                    payload_snapshot={
+                        'terminal': True,
+                        'reason': 'unknown_response_type',
+                        'response_type': e.raw,
+                        'attempt_count': log.attempt_count,
+                    },
+                ))
             except Exception as e:
                 logger.exception("Forwarding %s failed: %s", log.guid, e)
                 _mark_retryable(log, str(e))

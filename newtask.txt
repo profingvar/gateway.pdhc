@@ -1,0 +1,50 @@
+gateway.pdhc — current focus
+============================
+
+#871 response_type vocabulary — DONE AND DEPLOYED (2026-11-04). Ticket closed.
+
+364 pass / 4 skip (was 317 + 47 new). Five mutations confirm every new test
+group is load-bearing. Deployed and verified by behaviour in the container
+(choice -> valueCodeableConcept, datetime/date -> valueDateTime, both controls
+holding); health 200, sibling smoke 9/9.
+
+NOTE the deploy dir is /usr/local/www/gateway.pdhc.se/gateway_app — with the
+`.se` suffix. /usr/local/www/gateway.pdhc does not exist.
+
+What #871 turned out to be
+--------------------------
+NOT plan-vs-gateway, which is how the ticket read. The disagreement was
+between gateway's own producer and its own consumers, with no network between
+them:
+
+    producer  _extract_qr_answer        numeric text boolean date datetime choice
+    consumer  _SURVEY_TYPES             categorical boolean text dateTime graph
+    consumer  VALID_RESPONSE_TYPES      numeric categorical text boolean dateTime graph
+
+`text` and `boolean` matched; `choice`/`datetime`/`date` did not. #489 fixed
+quantity-coercion of a coded value for the spelling `categorical`, and the
+producer spelled it `choice` — so the fix for "the core corruption bug" existed,
+was tested, and the producer routed around it. A Likert "5" became a
+valueQuantity.
+
+Live on the QuestionnaireResponse path ONLY: `_store_questionnaire_response`
+never calls the validator. The provider-report path (`ingest`) validated
+against the canonical six all along.
+
+Next on this repo
+-----------------
+1. #930 — the repo compose sweep. gateway's own is FIXED (it carried a bare
+   `postgresql://` while the deployed one said `+psycopg2`, so a rebuild from
+   the repo file would have crash-looped it). 7 other repo composes are still
+   bare: cdr_6, cgm, mitidbok, provider, request (x2), sso. Whether each would
+   actually crash depends on the SQLAlchemy version installed there — measure
+   per service, do not assume.
+2. DATA QUESTION, not fixed here: rows already delivered to cdr1 from the QR
+   path carry the wrong value[x] — a coded answer as a valueQuantity, a
+   date as a valueString. How many, and whether to restamp, needs a count
+   against cdr1 first. Worth its own ticket; do not fix blind.
+3. `guid_resolution._extract_action_context` still writes an HL7 action-type
+   code into a key named `response_type`. Harmless today (opaque cache, no
+   reader) and documented at the site. If it is ever wired into the ingest
+   path it will make `Invalid response_type "collect-information"` reject
+   valid provider reports — give it its own key then.

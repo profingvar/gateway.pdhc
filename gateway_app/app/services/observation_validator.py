@@ -11,7 +11,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-VALID_RESPONSE_TYPES = ('numeric', 'categorical', 'text', 'boolean', 'dateTime', 'graph')
+# #871: this was a SIXTH hand-written copy of the response_type vocabulary.
+# It happened to agree with the builder's (same six values, different order),
+# but agreeing by luck is what the ticket is about — the PRODUCER
+# (`_extract_qr_answer`) disagreed with both, and nothing noticed.
+#
+# The aliases in `response_types` are deliberately NOT applied here. They are
+# an internal bridge for rows gateway itself already queued; the submission
+# contract providers code against (provider.pdhc's guided_response.py) stays
+# canonical, so a provider sending `choice` is still told what the six values
+# are rather than quietly accepted into a widened wire format.
+from .response_types import CANONICAL as VALID_RESPONSE_TYPES
 
 
 class ObservationValidationResult:
@@ -141,4 +151,17 @@ class ObservationValidator:
                     index, 'value',
                     f'Expected graph marker string, got {type(value).__name__}',
                 )
+
+        else:
+            # #871: unreachable TODAY — `_validate_single` rejects anything
+            # outside VALID_RESPONSE_TYPES before calling this. The branch
+            # exists because the chain above is a hand-written mirror of that
+            # tuple, and a value SILENTLY validated by nothing is the failure
+            # this ticket is about. If a seventh type is added to CANONICAL and
+            # not here, this says so instead of passing.
+            result.add_error(
+                index, 'response_type',
+                f'No value validation implemented for response_type '
+                f'"{response_type}"',
+            )
 

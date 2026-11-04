@@ -550,9 +550,16 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
     separate InboundObservation so downstream display and analysis can
     work with individual answers instead of one opaque blob.
 
-    Creates N+1 records: one parent record (response_type='QuestionnaireResponse')
+    Creates N+1 records: one parent receipt record
     holding the full QR resource, plus one child record per answered item
-    (response_type set per answer type: 'numeric', 'choice', 'text', etc.).
+    (response_type set per answer type — CANONICAL values only since #871; see
+    app/services/response_types.py, which owns the vocabulary).
+
+    NOTE the parent is `status='skipped'` and its fhir_observation_json is the
+    raw report payload: it carries no response_type and never reaches the
+    builder. This docstring used to say the parent is
+    `response_type='QuestionnaireResponse'`, which was never true of the row —
+    that string appears only in the audit payload and the HTTP response.
     """
     # QR endpoint dedup — same as Step 8 in the main path, queries
     # CdrDeliveryLog (phase 1 SSOT cutover).
@@ -687,12 +694,21 @@ def _extract_qr_answer(answer):
     if 'valueBoolean' in answer:
         return answer['valueBoolean'], 'boolean'
     if 'valueDate' in answer:
-        return answer['valueDate'], 'date'
+        # #871: `dateTime`, not `date`. FHIR's dateTime admits a date-only
+        # value (`2026-03-14` is a valid dateTime), so nothing is invented by
+        # widening it, and the builder has no `date` branch to land in.
+        return answer['valueDate'], 'dateTime'
     if 'valueDateTime' in answer:
-        return answer['valueDateTime'], 'datetime'
+        # #871: was `datetime` — a CASE difference from the only spelling the
+        # builder and validator know. It fell through both.
+        return answer['valueDateTime'], 'dateTime'
     if 'valueCoding' in answer:
+        # #871: was `choice`. The builder checks `categorical`, so a coded
+        # answer reached its blind-float() branch and a Likert "5" or a coded
+        # "100" was written to the clinical store as a valueQuantity — a
+        # NUMBER where a code belonged.
         coding = answer['valueCoding']
-        return coding.get('display', coding.get('code', '')), 'choice'
+        return coding.get('display', coding.get('code', '')), 'categorical'
     if 'valueQuantity' in answer:
         q = answer['valueQuantity']
         return q.get('value'), 'numeric'

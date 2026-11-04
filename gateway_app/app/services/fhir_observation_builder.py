@@ -1,11 +1,15 @@
 """Build a fully referenced FHIR R5 Observation from an InboundObservation row.
 
 Used by:
-  - app/api/observations.py — for analyse-phase consumers (dashboard
-    pull). Wraps results in a searchset Bundle.
   - app/services/cdr_forwarder.py — for forwarding to cdr.pdhc. Sends
     the Observation as the fhir_resource payload to cdr1's
-    /api/v1/ingest endpoint.
+    /api/v1/ingest endpoint, and `build_canonical_observation` as the
+    typed core rosetta renders to openEHR (#501).
+
+This list used to name `app/api/observations.py` as the other caller. It is
+not one and has not been since #540 moved the analyse-phase pull to
+`analyse_client`; that module imports neither entry point. Corrected while
+fixing #871, because a stale docstring is read as an instruction.
 
 Includes back-references to ServiceRequest, PlanDefinition, Contract,
 Organizations (requester + provider), Goals, and reference ranges.
@@ -16,8 +20,10 @@ import json
 
 UNIT_SYSTEM = 'https://plan.pdhc.se/api/v1/lookup/units'
 VALUE_SYSTEM = 'https://plan.pdhc.se/api/v1/lookup/values'
-# response_types that come from questionnaire/survey answers (not lab results).
-_SURVEY_TYPES = ('categorical', 'boolean', 'text', 'dateTime', 'graph')
+# #871: the response_type vocabulary has ONE owner. `SURVEY_TYPES` is DERIVED
+# there (canonical minus `numeric`); this module used to hand-maintain a second
+# tuple, which is what drifted from the producer.
+from .response_types import is_survey, normalise  # noqa: E402
 
 
 def _unit_fields(base, unit_display, unit_code):
@@ -57,7 +63,13 @@ def build_canonical_observation(row):
     return {
         'concept_guid': getattr(row, 'concept_guid', None) or raw.get('concept_guid'),
         'value': raw.get('value'),
-        'response_type': raw.get('response_type'),
+        # #871: canonical here too. This dict is rosetta's openEHR source
+        # (#501) and used to carry the producer's `choice`/`datetime`
+        # spellings outward. Measured 2026-11-04: cdr1 has no non-test
+        # reader of this field and rosetta's only references are test
+        # fixtures ALREADY using canonical values — so this sends rosetta
+        # what its own test assumes gateway sends.
+        'response_type': normalise(raw.get('response_type')),
         'unit': raw.get('unit') or None,
         'unit_display': raw.get('unit_display') or None,
         'range_min': raw.get('range_min'),
@@ -94,8 +106,13 @@ def _add_typed_value(obs, value, rtype, unit_display, unit_code):
     elif rtype in ('text', 'graph'):
         obs['valueString'] = str(value)
     else:
-        # unknown/legacy response_type: best-effort, but still never mislabel a
-        # non-numeric as a quantity.
+        # #871: rtype is '' here and ONLY '' — `normalise` raises on a declared
+        # value it does not know, so this is absence, not an unknown spelling.
+        # Absence keeps the pre-#871 best-effort behaviour deliberately: provider
+        # payloads in the wild may omit the field, and a vocabulary fix is not the
+        # place to start refusing live traffic. The docstring's promise above is
+        # now TRUE for every declared type, which it was not while the producer
+        # spelled categorical `choice` and landed here.
         try:
             obs['valueQuantity'] = _unit_fields({'value': float(value)}, unit_display, unit_code)
         except (TypeError, ValueError):
@@ -117,10 +134,13 @@ def build_fhir_observation(row, sr_contexts=None, contract_scopes=None):
     eff = recorded or (row.received_at.isoformat() if row.received_at else None)
 
     value = raw.get('value')  # #490: no row.value fallback — CdrDeliveryLog has no such column
-    rtype = (raw.get('response_type') or '').strip()
+    # #871: normalise ONCE, here. The producer emitted `choice`/`datetime`/
+    # `date`; this module only ever understood `categorical`/`dateTime`, so an
+    # un-normalised value fell through BOTH decisions below.
+    rtype = normalise(raw.get('response_type'))
 
     # #489.4: questionnaire/survey answers are not laboratory results.
-    _cat = ('survey', 'Survey') if rtype in _SURVEY_TYPES else ('laboratory', 'Laboratory')
+    _cat = ('survey', 'Survey') if is_survey(rtype) else ('laboratory', 'Laboratory')
 
     obs = {
         'resourceType': 'Observation',

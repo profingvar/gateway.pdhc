@@ -886,3 +886,125 @@ Gateway health 200, sibling smoke 9/9, platform 39 containers 0 unhealthy.
 exists only during the live fetch: a delivery retried after its ServiceRequest
 is archived will carry NULL, honestly. Storing it on the log row would make
 retries self-contained — a candidate follow-up, not done here.
+
+## #871 — one response_type vocabulary (2026-11-04, code done, not deployed)
+
+The ticket said "ROWS in plan and a TUPLE in gateway". That framing is wrong,
+and the measurement is the useful part: the disagreement was **inside gateway**,
+between its own producer and its own two consumers, with no network between
+them.
+
+| where | values |
+|---|---|
+| producer `_extract_qr_answer` | numeric text boolean **date datetime choice** |
+| consumer `_SURVEY_TYPES` | categorical boolean text dateTime graph |
+| consumer `VALID_RESPONSE_TYPES` | numeric categorical text boolean dateTime graph |
+
+`text` and `boolean` matched, which is why nothing ever showed. Three did not:
+`choice` against `categorical`, `datetime` against `dateTime` (a **case**
+difference), and `date`, which appeared in no consumer at all.
+
+**What it cost.** `test_categorical_is_codeableconcept_not_quantity` calls
+quantity-coercion of a coded value "the core corruption bug" and fixes it under
+#489 — for the spelling `categorical`. The questionnaire producer spelled it
+`choice`, so every coded questionnaire answer reached the builder's `else`
+branch, which blind-`float()`s. A Likert "5" or a coded "100" was written to the
+clinical store as a `valueQuantity`: a number where a code belonged. The fix
+existed, was tested, and the producer routed around it.
+
+**Why no test caught it.** All 31 pre-#871 `response_type` references in the
+suite use canonical spellings; not one uses `choice`, `datetime` or `date`. The
+suite exercised the vocabulary the consumers understand and never the one the
+producer emits — the tests and the producer disagreed, and the tests won. The
+keeper test now reads the producer's returns from the **parse tree** and
+requires each to be in `CANONICAL`.
+
+**Scope, measured rather than assumed.** Live on the QuestionnaireResponse path
+ONLY — `_store_questionnaire_response` never calls the validator, so its
+children go straight to the forwarder and the builder. The provider-report path
+(`ingest`) validated against the canonical six all along and refused anything
+else at submit, so `choice` could never arrive that way. cdr1 has **zero**
+non-test readers of the field; rosetta's only references are test fixtures
+already using canonical spellings, so normalising `build_canonical_observation`
+sends rosetta what its own test assumes.
+
+**Two corrections to my own earlier reading, both from measuring:**
+
+- I said the validator "validates an unknown type with nothing". True of
+  `_validate_value_type`, which has no `else` — but **unreachable**, because
+  `_validate_single` already refuses anything outside the tuple. An
+  overstatement; the `else` was added anyway, as a guard against a seventh
+  type, and says in its comment that it is unreachable today.
+- My first handler-order test compared `except` clauses across the whole
+  function. `run_forwarding_cycle` has a second `try` around the row claim, so
+  the comparison spanned two unrelated blocks and **would have failed on
+  correct code**. Scoped to the owning `Try` node. Same shape as CLAUDE.md §7:
+  a pattern applied at a granularity the thing does not live at.
+
+`SURVEY_TYPES` is now **derived** (`CANONICAL` minus `numeric`) rather than
+written, which is the ticket's real ask, and a control asserts the derivation
+reproduces the old hand-written tuple exactly. `VALID_RESPONSE_TYPES` was a
+sixth copy and is now an import. The aliases are deliberately **not** applied in
+the validator: they bridge rows gateway itself already queued, while the
+provider submission contract stays canonical.
+
+364 tests pass / 4 skip (was 317). Five mutations — producer reverted, builder
+un-normalised, `SURVEY_TYPES` hand-written, `normalise` swallowing an unknown,
+handler order flipped — fail 2, 7, 1, 6 and 1 tests respectively.
+
+**Not done, deliberately:** rows already in cdr1 from the QR path carry the
+wrong `value[x]`. That is a data question needing a count against cdr1 before
+anyone decides to restamp; it belongs in its own ticket.
+
+### Deployed 2026-11-04, and the baseline gate paid for itself
+
+`docker-compose up -d --build --no-deps app` at
+`/usr/local/www/gateway.pdhc.se/gateway_app` (note the `.se` suffix — the deploy
+dir is NOT `/usr/local/www/gateway.pdhc`). Predeploy backup
+`~/backups/predeploy/gateway.pdhc/20261104T161745Z`, rollback image
+`sha256:44b80710a167`.
+
+The three-way gate — HEAD vs server disk vs container — was **clean** on all
+five modified files, so there was no server-side edit to preserve. Pinning was
+checked first: all 14 direct dependencies carry `==`, SQLAlchemy explicitly, so
+the `--build` was not also a dependency upgrade (#785).
+
+**Verified by behaviour inside the deployed container, not by status:**
+
+| input | result | |
+|---|---|---|
+| `choice` | `valueCodeableConcept`, survey | was valueQuantity / laboratory |
+| `datetime` | `valueDateTime`, survey | was valueString / laboratory |
+| `date` | `valueDateTime`, survey | |
+| no response_type | `valueQuantity`, laboratory | **CONTROL** — the coercion branch still exists, so the rows above mean the type is understood, not that the branch was deleted |
+| declared unknown | refused by name | **CONTROL** |
+| `numeric` | `valueQuantity` | unchanged |
+
+File hashes inside the container match the local files exactly, so the change is
+in the IMAGE rather than a `docker cp` artifact. `/api/v1/health` 200 (200
+before), `cdr_delivery_log` unchanged at delivered=361 skipped=6 failed=0
+pending=0, sibling smoke 9/9. `tests/` is absent from the image by design
+(`.dockerignore:17`), so the 47 tests were run locally against byte-identical
+files and the deployed image was verified by behaviour instead — stated rather
+than implied.
+
+**The gate found a latent outage (#930).** gateway's REPO compose carried a bare
+`postgresql://` while the DEPLOYED one already said `postgresql+psycopg2://`.
+Measured in the running container: SQLAlchemy 2.1.3 pinned, psycopg v3
+**absent**, psycopg2 present — and SQLAlchemy 2.1 resolves a bare scheme to
+psycopg v3. So a rebuild from the repo file would have crash-looped gateway,
+and this deploy only escaped it by using the deployed compose. The repo copy is
+now fixed; a sweep found 7 other repo composes still bare.
+
+Two instrument errors of mine during the deploy, both caught and both the same
+shape as the ones #871 is about:
+
+- A nested heredoc (`<<'PY'` inside `ssh 'bash -s' <<'EOF'`) was eaten by the
+  outer one, so the behaviour check printed **nothing**. An empty output is not
+  a pass; it was redone through a staged file.
+- My "did the compose fix land?" check was `grep -oE 'postgresql.*://' | head -1`
+  — which matched **my own new comment** explaining the fix, and reported the
+  bare form. Minutes after filing #930, whose body warns about exactly this. The
+  honest check strips comment lines first, and then finds exactly one live DSN,
+  `+psycopg2`.
+

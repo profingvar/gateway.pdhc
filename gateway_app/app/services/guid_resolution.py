@@ -263,6 +263,25 @@ def _extract_action_context(action):
     return {
         'concept_guid': first_coding.get('code', ''),
         'concept_name': first_coding.get('display', ''),
+        # #871 HAZARD, deliberately left as-is. This key is named
+        # `response_type` and holds an HL7 **action-type** code — plan emits
+        # `collect-information` on a form action (plan.pdhc
+        # services/fhir_service.py:121), which is a different vocabulary from
+        # the one app/services/response_types.py owns.
+        #
+        # It is harmless TODAY and was measured so on 2026-11-04: this dict
+        # goes only to `ResolvedChain.to_context_dict` -> the opaque
+        # `guid_resolution_cache.resolved_json` column. Nothing reads the
+        # field — not a route, not a template, not a test — and it never
+        # reaches an observation.
+        #
+        # The hazard is the NAME. report_ingestion's ingest path does
+        # `obs['response_type'] = txn.get('response_type') or obs.get(...)`
+        # and validates AFTER, so wiring this value into that path would make
+        # `Invalid response_type "collect-information"` reject an otherwise
+        # valid provider report. Left rather than blanked because blanking
+        # removes information from a cache no reader has, which is churn; if
+        # this is ever wired in, give it its own key.
         'response_type': action.get('type', {}).get('coding', [{}])[0].get('code', '')
                          if isinstance(action.get('type'), dict) else '',
         'activity_description': action.get('title', action.get('description', '')),
