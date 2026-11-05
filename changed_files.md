@@ -244,3 +244,28 @@ Was failing open (401). Read-path defense-in-depth only. NOTE: fetch_active_bloc
 - 2026-11-04 gateway_app/tests/test_response_type_vocabulary_871.py — NEW (#871). 47 tests. The keeper reads the producer's returns from the PARSE TREE and requires each to be in CANONICAL — the test that would have caught this. Five mutations verified each group fails without the fix.
 - 2026-11-04 newtask.txt — NEW. Rule 2 required it and the repo had none.
 - 2026-11-04 gateway_app/docker-compose.yml — EDIT (#711, #930). `postgresql://` → `postgresql+psycopg2://`. Found by the #871 deploy's baseline gate: the DEPLOYED compose already said +psycopg2, so the repo copy had drifted from production. Measured in the running container — SQLAlchemy 2.1.3 (pinned), psycopg v3 ABSENT, psycopg2 present — so a `docker-compose up -d --build` from the repo file would have crash-looped gateway. #930 carries the sweep; 7 other repo composes are still bare. Validated with real `docker-compose config` (exit 0, resolves +psycopg2).
+
+#930 — bare `postgresql://` DSN converted to `+psycopg2` (2026-11-05)
+---------------------------------------------------------------------
+/Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/.env.example:10
+
+The COMPOSE was fixed under #930 on 2026-11-04; the `.env.example` was not,
+and no hand sweep had looked at one. It is what Rule 23 copies to make the
+real `.env` on a fresh deploy, so a bare DSN here reaches production by hand
+even when the compose is right. SQLAlchemy 2.1.3 is pinned here.
+
+WHY. SQLAlchemy 2.1 resolves a bare `postgresql://` to psycopg **v3** (#711).
+This service installs `psycopg2-binary` and not psycopg v3, so a bare scheme
+lets the INSTALLED SQLAlchemy pick a driver that is absent and the app
+crash-loops on the next `--build`. Verified it passes nothing to a raw
+`psycopg2.connect()` (which cannot parse a `+driver` scheme) — the DSN goes to
+SQLAlchemy only.
+
+NOT DEPLOYED and nothing regresses without it: a config-only compose change
+needs `docker-compose up -d` WITHOUT `--build`. The deployed compose still has
+to be compared (#940) — gateway's deployed copy already said `+psycopg2` while its
+repo copy did not, which is how this drift was found at all.
+
+Guarded by `tools/audit_dsn_drivers.py` (exit 1 on any bare DSN, 20 paired
+tests). The claim "all 21 services now use +psycopg2 explicitly (#711)" was
+false for 11 files; a hand survey cannot be the gate here.
