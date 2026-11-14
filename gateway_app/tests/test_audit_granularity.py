@@ -122,7 +122,8 @@ def _blob(orgs, admin=False, phases=('analysis',)):
         'user_type': 'professional',
         'is_su_admin': admin,
         'effective_phases': list(phases),
-        'organization_ids': list(orgs),
+        # care units are AFFILIATIONS; organization_ids (memberships) no longer scope (2026-11-14)
+        'affiliations': [{'care_unit_guid': o} for o in orgs],
     }
 
 

@@ -65,7 +65,8 @@ def _blob(admin=True):
         'user_type': 'professional',
         'is_su_admin': admin,
         'effective_phases': ['analysis'],
-        'organization_ids': [ORG_REQ],
+        # care units are AFFILIATIONS; organization_ids (memberships) no longer scope (2026-11-14)
+        'affiliations': [{'care_unit_guid': ORG_REQ}],
     }
 
 

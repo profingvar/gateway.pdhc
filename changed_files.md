@@ -269,3 +269,8 @@ repo copy did not, which is how this drift was found at all.
 Guarded by `tools/audit_dsn_drivers.py` (exit 1 on any bare DSN, 20 paired
 tests). The claim "all 21 services now use +psycopg2 explicitly (#711)" was
 false for 11 files; a hand survey cannot be the gate here.
+
+## 2026-11-14 — organization_ids fallback removed (care unit = affiliation only)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/sso_service.py — scope_org_guids reads affiliations only
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_reform_scope.py — the fallback-pinning test inverted
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_blocks_filter.py, test_observations_endpoint.py, test_audit_granularity.py — blobs carry affiliations; + route test: organization_ids alone get no rows

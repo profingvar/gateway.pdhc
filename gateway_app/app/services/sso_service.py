@@ -159,15 +159,18 @@ def map_role(access_blob):
 
 
 def scope_org_guids(access_blob):
-    """Zone-1 read scope (M0 #418): affiliations[].care_unit_guid — the exact
-    equivalent of the legacy flat organization_ids semantics — with a dual-read
-    fallback to organization_ids for tokens issued before the reform blob went
-    live. Zone-2 (parent care organisation) is deliberately NOT folded in here.
+    """Zone-1 read scope (M0 #418): affiliations[].care_unit_guid, and ONLY
+    that. Zone-2 (parent care organisation) is deliberately NOT folded in.
+
+    The dual-read fallback to the legacy organization_ids was REMOVED
+    2026-11-14. Those are SSO memberships, which are not care-unit
+    assignments; under the main rule (operator 2026-11-13) patients are
+    reached through affiliated care units only. Removed once every
+    professional had an affiliation, so nobody lost access. No affiliation
+    now means no scope: absence narrows, never widens.
     """
     affs = (access_blob or {}).get('affiliations') or []
-    if affs:
-        return [a['care_unit_guid'] for a in affs if a.get('care_unit_guid')]
-    return list((access_blob or {}).get('organization_ids') or [])
+    return [a['care_unit_guid'] for a in affs if a.get('care_unit_guid')]
 
 
 def has_analysis_access(access_blob):

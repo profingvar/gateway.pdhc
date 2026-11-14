@@ -120,7 +120,8 @@ def _blob(orgs, admin=False, phases=('analysis',)):
         'user_type': 'professional',
         'is_su_admin': admin,
         'effective_phases': list(phases),
-        'organization_ids': list(orgs),
+        # care units are AFFILIATIONS; organization_ids (memberships) no longer scope (2026-11-14)
+        'affiliations': [{'care_unit_guid': o} for o in orgs],
     }
 
 
@@ -195,6 +196,23 @@ class TestRequestingOrgFilter:
         assert r.status_code == 200
         ids = [e['resource']['id'] for e in r.get_json()['entry']]
         assert ids == ['obs-B']
+
+    def test_legacy_organization_ids_ALONE_get_no_rows(self, client, db):
+        """2026-11-14: the organization_ids fallback is removed. A caller
+        whose only link to ORG_A is an old MEMBERSHIP used to get obs-A; now
+        it is not in ORG_A's scope and gets nothing."""
+        _seed(db)
+        legacy = dict(_blob([]), organization_ids=[ORG_A])
+        legacy.pop('affiliations', None)
+        with patch('app.api.observations.validate_sso_token',
+                   return_value=legacy), _patch_parties(), _patch_cdr():
+            r = client.get(
+                f'/api/v1/observations?organization={ORG_A}',
+                headers={'Authorization': 'Bearer t'},
+            )
+        rows = (r.get_json() or {}).get('entry') or [] if r.status_code == 200 else []
+        assert r.status_code != 200 or rows == [], (r.status_code, rows)
+        assert 'obs-A' not in [e['resource']['id'] for e in rows]
 
     def test_admin_bypass_org_scope(self, client, db):
         """Admin querying ORG_A still only sees ORG_A's data — admin bypass

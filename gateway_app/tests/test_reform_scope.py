@@ -17,8 +17,12 @@ def test_scope_precedence_over_legacy():
     assert scope_org_guids(blob) == ["u1"]
 
 
-def test_scope_legacy_fallback():
-    assert scope_org_guids({"organization_ids": ["o1"]}) == ["o1"]
+def test_legacy_organization_ids_ALONE_grant_no_scope():
+    """2026-11-14: this test used to PIN the fallback (organization_ids ->
+    scope). Memberships are not care-unit assignments; no affiliation, no
+    scope."""
+    assert scope_org_guids({"organization_ids": ["o1"]}) == []
+    assert scope_org_guids({"affiliations": [], "organization_ids": ["o1"]}) == []
 
 
 def test_scope_empty_and_none():
