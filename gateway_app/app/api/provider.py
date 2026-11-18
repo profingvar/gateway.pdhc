@@ -2,6 +2,7 @@
 
 These are the endpoints that provider.pdhc calls:
 - POST /provider/report/<sr_guid>  — submit observation report
+- POST /provider/status/<sr_guid>  — lifecycle status, no data (to request.pdhc)
 - GET  /provider/feed              — poll for ServiceRequests
 - GET  /provider/download/<sr_guid> — download FHIR Bundle
 - POST /provider/receipt/<token>/ack — acknowledge delivery
@@ -41,6 +42,22 @@ def submit_report(service_request_guid):
 
     result = ReportIngestionService.ingest(service_request_guid, body)
     return jsonify(result), 202
+
+
+@api_bp.route('/provider/status/<service_request_guid>', methods=['POST'])
+@require_provider_token(scope='write')
+def provider_status(service_request_guid):
+    """Lifecycle status without observation data (e.g. 'acknowledged').
+
+    Proxied to request.pdhc's /provider/status. Observation data still goes
+    to /provider/report, which validates and forwards it to the CDR.
+    """
+    g.service_request_guid = service_request_guid
+    body = request.get_json(silent=True)
+    if not body:
+        raise APIError('JSON body required', code='BAD_REQUEST', status_code=400)
+    data, status = FeedService.post_status(service_request_guid, g.raw_token, body)
+    return jsonify(data), status
 
 
 @api_bp.route('/provider/receipt/<receipt_token>/ack', methods=['POST'])

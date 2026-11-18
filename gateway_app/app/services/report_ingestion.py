@@ -784,6 +784,13 @@ def _send_receipt(sr_guid, patient_guid, org_guid, contract_guid,
                            'request did not go through @require_provider_token?')
             return
 
+        # A poll-mode provider has no push endpoint by design: it reads its
+        # results from the feed. That is not a broken PAT, so do not say so
+        # (the warning fired on every cgm_provider report, 2026-11-18).
+        if getattr(pat, 'delivery_mode', None) == 'poll':
+            logger.debug('PAT for org %s is poll-mode; no receipt push', org_guid)
+            return
+
         push_url = getattr(pat, 'push_endpoint_url', None)
         push_secret = getattr(pat, 'push_secret', None)
         if not push_url or not push_secret:

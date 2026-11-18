@@ -110,6 +110,46 @@ class FeedService:
             return {'code': 'INTERNAL_ERROR', 'message': str(e)}, 500
 
 
+    @staticmethod
+    def post_status(service_request_guid, raw_token, body):
+        """Proxy a lifecycle status update to request.pdhc.
+
+        request.pdhc owns ServiceRequest lifecycle (`/provider/status`), but a
+        provider only knows gateway.pdhc. Without this route the only path was
+        `/provider/report`, which requires observation data — so a status
+        with no data (e.g. 'acknowledged') was refused 400 and the requester
+        never learned the provider had taken the task. Found on the
+        cgm_provider onboarding, 2026-11-18. The body is forwarded unchanged;
+        request.pdhc validates the composite key and the PAT's org.
+        """
+        base_url = current_app.config['REQUEST_SERVICE_URL']
+        url = f'{base_url}/provider/status/{service_request_guid}'
+        try:
+            resp = http_requests.post(
+                url,
+                json=body,
+                headers={
+                    'X-Provider-Token': raw_token,
+                    'X-Correlation-Id': flask_request.headers.get('X-Correlation-Id', ''),
+                    **outbound_session_headers(),
+                },
+                timeout=current_app.config.get('PUSH_TIMEOUT_SECONDS', 30),
+            )
+            _audit_feed('provider.status.forwarded', resp.status_code,
+                        sr_guid=service_request_guid)
+            try:
+                return resp.json(), resp.status_code
+            except ValueError:
+                return ({'code': 'UPSTREAM_ERROR', 'message': resp.text[:300]},
+                        resp.status_code if resp.status_code >= 400 else 502)
+        except http_requests.ConnectionError:
+            logger.warning('request.pdhc unreachable for status at %s', url)
+            return {'code': 'UPSTREAM_UNREACHABLE', 'message': 'request.pdhc is unreachable'}, 502
+        except Exception as e:
+            logger.error('Status proxy error: %s', e)
+            return {'code': 'INTERNAL_ERROR', 'message': str(e)}, 500
+
+
 def _audit_feed(event_type, status_code, sr_guid=None):
     """Log a feed/download event."""
     try:
