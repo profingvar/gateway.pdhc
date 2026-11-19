@@ -1011,3 +1011,4 @@ shape as the ones #871 is about:
 
 ## 2026-11-19 — OUT_OF_SCALE (operator: "skalkontroll")
 - MMD sent stress 8 and 9 on a 1-7 scale and both were stored: gateway checked no ranges at all, and stress had no range in the frozen plan. Now each value is checked against its CONCEPT scale (scale_min/max from request.pdhc = plan concept range_low/high). Outside -> dropped with code OUT_OF_SCALE in observations_rejected, rest of the report stored (action partial); all outside -> 422 OUT_OF_SCALE. The clinical target range is never a reason to refuse. +3 tests (2 fail against the old code), suite 372 passed.
+- DEPLOYED 2026-11-19 (overlay; rollback tag `:pre_scale`, files `*.pre_scale.<ts>`). Baseline ok, health 200, hashes ok. Verified in production: a4dbcff2 transactions carry their concept scales.
