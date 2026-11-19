@@ -1008,3 +1008,6 @@ shape as the ones #871 is about:
   honest check strips comment lines first, and then finds exactly one live DSN,
   `+psycopg2`.
 
+
+## 2026-11-19 — OUT_OF_SCALE (operator: "skalkontroll")
+- MMD sent stress 8 and 9 on a 1-7 scale and both were stored: gateway checked no ranges at all, and stress had no range in the frozen plan. Now each value is checked against its CONCEPT scale (scale_min/max from request.pdhc = plan concept range_low/high). Outside -> dropped with code OUT_OF_SCALE in observations_rejected, rest of the report stored (action partial); all outside -> 422 OUT_OF_SCALE. The clinical target range is never a reason to refuse. +3 tests (2 fail against the old code), suite 372 passed.

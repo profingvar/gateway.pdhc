@@ -262,6 +262,9 @@ class ReportIngestionService:
                             obs['unit_display'] = txn.get('unit_display') or obs.get('unit_display', '')
                             obs['range_min'] = txn.get('range_min')
                             obs['range_max'] = txn.get('range_max')
+                            # The concept's SCALE (2026-11-19), from request.pdhc.
+                            obs['scale_min'] = txn.get('scale_min')
+                            obs['scale_max'] = txn.get('scale_max')
                             obs['requirement_type'] = txn.get('requirement_type', '')
                             # Preserve the procedure concept for audit —
                             # we stored over obs['concept_guid'] above.
@@ -290,6 +293,44 @@ class ReportIngestionService:
                 status_code=400,
             )
 
+        # ── Step 6b: Concept SCALE (2026-11-19) ─────────────────────
+        # A value outside its concept's scale (stress 1-7, systolic 60-250)
+        # is not a measurement and is DROPPED with OUT_OF_SCALE; the rest of
+        # the report is accepted, as for out-of-scope concepts. This is the
+        # SCALE, never the plan's clinical target range: a systolic of 160 is
+        # exactly what should be stored and flagged, and is accepted.
+        rejected_out_of_scale = []
+        original_index = {id(o): i for i, o in enumerate(observations)}
+        if observations:
+            kept = []
+            for idx, obs in enumerate(observations):
+                problem = _outside_scale(obs)
+                if problem:
+                    rejected_out_of_scale.append({
+                        'observation_index': idx,
+                        'code': 'OUT_OF_SCALE',
+                        'concept_guid': obs.get('concept_guid'),
+                        'transaction_guid': obs.get('transaction_guid'),
+                        'value': obs.get('value'),
+                        'scale_min': obs.get('scale_min'),
+                        'scale_max': obs.get('scale_max'),
+                        'message': problem,
+                    })
+                else:
+                    kept.append(obs)
+            if rejected_out_of_scale:
+                _audit_rejection(service_request_guid, patient_guid,
+                                 provider_org_guid, contract_guid,
+                                 'OUT_OF_SCALE', rejected_out_of_scale)
+                if not kept:
+                    raise APIError(
+                        'All observations are outside their concept scale',
+                        code='OUT_OF_SCALE',
+                        status_code=422,
+                        details=rejected_out_of_scale,
+                    )
+            observations = kept
+
         # ── Step 7: Contract scope validation ───────────────────────
         # Partial acceptance: an observation whose (authoritative) concept
         # is outside the contract return_scope is DROPPED and reported —
@@ -298,7 +339,7 @@ class ReportIngestionService:
         # the obligatory-on-completed completeness check (a contract can't
         # be completed without its obligatory returns), and the degenerate
         # case where every observation is out of scope (nothing to accept).
-        rejected_out_of_scope = []
+        rejected_out_of_scope = list(rejected_out_of_scale)
         scope_result = ContractScopeService.fetch_scope(contract_guid)
         if scope_result.valid and scope_result.scope_defined and observations:
             permitted = scope_result.all_permitted_guids
@@ -307,7 +348,7 @@ class ReportIngestionService:
                 concept_guid = obs.get('concept_guid')
                 if concept_guid and concept_guid not in permitted:
                     rejected_out_of_scope.append({
-                        'observation_index': idx,
+                        'observation_index': original_index.get(id(obs), idx),
                         'concept_guid': concept_guid,
                         'transaction_guid': obs.get('transaction_guid'),
                         'message': 'Concept not in contract return scope',
@@ -540,6 +581,23 @@ class ReportIngestionService:
         if rejected_out_of_scope:
             resp['observations_rejected'] = rejected_out_of_scope
         return resp
+
+
+def _outside_scale(obs):
+    """A reason string when a numeric value lies outside its concept's scale,
+    else None. No scale, or a non-numeric value, is never refused here."""
+    lo, hi = obs.get('scale_min'), obs.get('scale_max')
+    if lo is None and hi is None:
+        return None
+    try:
+        v = float(obs.get('value'))
+    except (TypeError, ValueError):
+        return None
+    if lo is not None and v < float(lo):
+        return f'Value {obs.get("value")} is below the concept scale minimum {lo}'
+    if hi is not None and v > float(hi):
+        return f'Value {obs.get("value")} is above the concept scale maximum {hi}'
+    return None
 
 
 def _store_questionnaire_response(sr_guid, patient_guid, org_guid,

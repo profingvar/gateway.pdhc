@@ -274,3 +274,7 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/sso_service.py — scope_org_guids reads affiliations only
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_reform_scope.py — the fallback-pinning test inverted
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_blocks_filter.py, test_observations_endpoint.py, test_audit_granularity.py — blobs carry affiliations; + route test: organization_ids alone get no rows
+
+## 2026-11-19 — OUT_OF_SCALE
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/report_ingestion.py — step 6b drops values outside the concept scale
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_out_of_scale.py (NEW)
