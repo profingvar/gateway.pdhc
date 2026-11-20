@@ -96,6 +96,12 @@ class SRContextResult:
         return self._data.get('plan_definition_guid', '')
 
     @property
+    def care_plan_guid(self):
+        """The CarePlan the ServiceRequest is based on (2026-11-20), or ''.
+        Absent from a request.pdhc that predates the field."""
+        return self._data.get('care_plan_guid') or ''
+
+    @property
     def requester_user_guid(self):
         """The user who raised the ServiceRequest (#776). Same story."""
         return self._data.get('requester_user_guid', '')

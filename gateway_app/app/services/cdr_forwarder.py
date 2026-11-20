@@ -255,6 +255,7 @@ def _build_payload(log_row):
     sr_plan_definition_guid = None
     sr_requesting_org_guid = None
     sr_requester_user_guid = None
+    sr_care_plan_guid = None
     sr_guid = log_row.service_request_guid
     if sr_guid:
         try:
@@ -264,6 +265,7 @@ def _build_payload(log_row):
                 sr_plan_definition_guid = ctx.plan_definition_guid or None
                 sr_requesting_org_guid = ctx.requesting_org_guid or None
                 sr_requester_user_guid = ctx.requester_user_guid or None
+                sr_care_plan_guid = ctx.care_plan_guid or None
                 if log_row.contract_guid and ctx.requesting_org_guid:
                     contract_scopes = {log_row.contract_guid: {
                         'parties': {'requesting_org_guid': ctx.requesting_org_guid}}}
@@ -304,6 +306,11 @@ def _build_payload(log_row):
             'plan_definition_guid': sr_plan_definition_guid,
             'requesting_org_guid': sr_requesting_org_guid,
             'requester_user_guid': sr_requester_user_guid,
+            # 2026-11-20: the CarePlan the ServiceRequest is based on, from
+            # the same request.pdhc context. cdr's ClinicalContext and
+            # observation.care_plan_guid had no sender: 0 of 34 rows. None
+            # when request.pdhc names none (or predates the field).
+            'care_plan_guid': sr_care_plan_guid,
         },
     }
 
