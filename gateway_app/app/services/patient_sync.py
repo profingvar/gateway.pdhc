@@ -29,7 +29,7 @@ def reset_cache():
     _synced.clear()
 
 
-def build_patient_resource(patient_guid, name, birth_date=None):
+def build_patient_resource(patient_guid, name, birth_date=None, gender=None):
     """FHIR Patient with ``id`` = patient guid so cdr1's id-bearing POST does
     update-as-create and the live row's guid equals the patient guid."""
     resource = {
@@ -41,10 +41,14 @@ def build_patient_resource(patient_guid, name, birth_date=None):
     }
     if birth_date:
         resource['birthDate'] = birth_date
+    # 2026-11-20: the write REPLACES cdr1's Patient, so a sex not sent here is
+    # a sex erased there (Andrea Lindqvist, version 2). ips is the source.
+    if gender:
+        resource['gender'] = gender
     return resource
 
 
-def ensure_cdr_patient(patient_guid, name, birth_date=None, *,
+def ensure_cdr_patient(patient_guid, name, birth_date=None, gender=None, *,
                        session_id=None, cache=True):
     """Upsert the patient's demographics into cdr1 once.
 
@@ -62,7 +66,7 @@ def ensure_cdr_patient(patient_guid, name, birth_date=None, *,
                 _synced.add(patient_guid)  # nothing to write; don't retry
             return False
         CdrClient.write_patient(
-            build_patient_resource(patient_guid, name, birth_date),
+            build_patient_resource(patient_guid, name, birth_date, gender),
             request_id=f'patient-sync-{patient_guid}',
             session_id=session_id,
         )

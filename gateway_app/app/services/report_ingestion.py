@@ -167,7 +167,7 @@ class ReportIngestionService:
         # pseudonymous; a write failure never affects the receipt below.
         ensure_cdr_patient(
             patient_guid, sr_context.patient_name,
-            sr_context.patient_birth_date,
+            sr_context.patient_birth_date, sr_context.patient_gender,
             session_id=current_session_id(),
         )
 

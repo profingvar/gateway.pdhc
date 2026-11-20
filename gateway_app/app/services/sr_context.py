@@ -47,6 +47,12 @@ class SRContextResult:
         return self._data.get('patient_birth_date') or ''
 
     @property
+    def patient_gender(self):
+        """FHIR AdministrativeGender resolved from ips by request.pdhc, or ''
+        (2026-11-20). Without it every patient sync dropped the sex in cdr1."""
+        return self._data.get('patient_gender') or ''
+
+    @property
     def requesting_org_guid(self):
         # #294 RFC plan §4 / #301 (2026-06-28): canonical name is
         # `requesting_org_guid`. request.pdhc still emits the legacy

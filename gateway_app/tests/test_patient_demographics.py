@@ -80,3 +80,32 @@ def test_cache_false_writes_every_call():
         ps.ensure_cdr_patient('pat-5', 'Anna', cache=False)
         ps.ensure_cdr_patient('pat-5', 'Anna', cache=False)
     assert w.call_count == 2
+
+
+# --- gender (2026-11-20) ---------------------------------------------------
+# cdr1's Patient is REPLACED by this write, so a gender not sent is a gender
+# erased: Andrea Lindqvist's sex disappeared that way (version 2).
+
+def test_context_exposes_gender():
+    assert SRContextResult(found=True, data={'patient_gender': 'female'}).patient_gender == 'female'
+    assert SRContextResult(found=True, data={}).patient_gender == ''
+
+
+def test_gender_is_written_to_cdr1():
+    with patch.object(ps.CdrClient, 'write_patient', return_value={}) as w:
+        ps.ensure_cdr_patient('pat-g', 'Anna A', '1980-01-01', 'female')
+    assert w.call_args[0][0]['gender'] == 'female'
+
+
+def test_no_gender_omits_key_rather_than_guessing():
+    with patch.object(ps.CdrClient, 'write_patient', return_value={}) as w:
+        ps.ensure_cdr_patient('pat-n', 'Anna A', '1980-01-01')
+    assert 'gender' not in w.call_args[0][0]
+
+
+def test_both_callers_pass_the_contexts_gender():
+    import inspect
+    from app import cli
+    from app.services import report_ingestion
+    assert 'sr_context.patient_gender' in inspect.getsource(report_ingestion)
+    assert 'ctx.patient_gender' in inspect.getsource(cli)

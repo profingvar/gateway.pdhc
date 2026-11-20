@@ -58,7 +58,7 @@ def backfill_cdr_patients(yes):
             click.echo(f'  would-write  {patient_guid[:12]}  name={name!r}')
             continue
         ok = ensure_cdr_patient(patient_guid, name, ctx.patient_birth_date,
-                                cache=False)
+                                ctx.patient_gender, cache=False)
         written += 1 if ok else 0
         skipped += 0 if ok else 1
         click.echo(f'  {"wrote" if ok else "FAILED"}  {patient_guid[:12]}  '
