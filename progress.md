@@ -9,7 +9,7 @@ Tracking progress per deployment plan (readme.md). Tests use pytest. Results sto
 ### 2026-11-20 — care_plan_guid forwarded to the CDR
 - `_build_payload` puts the SR context's `care_plan_guid` in `clinical_context` (None when request.pdhc names none or the context is unavailable; delivery never blocks on it). `SRContextResult.care_plan_guid` added. cdr already stores it on clinical_context and observation.
 - Needs request.pdhc with the same change. sr_context cache (GUID_CACHE_TTL_SECONDS) may serve a context without the field until it expires.
-- tests/test_care_plan_forwarded.py (3; mutation-checked). Suite 375 passed, 5 skipped. Not yet deployed.
+- tests/test_care_plan_forwarded.py (3; mutation-checked). Suite 375 passed, 5 skipped. Deployed 2026-11-20 (overlay, rollback tag :pre_careplan); smokes request/gateway/cdr1/ips green.
 
 ### 1.a Project scaffold
 - Status: **Complete**
