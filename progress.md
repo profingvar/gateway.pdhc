@@ -9,7 +9,7 @@ Tracking progress per deployment plan (readme.md). Tests use pytest. Results sto
 ### 2026-11-20 — patient sync writes gender to cdr1
 - `build_patient_resource`/`ensure_cdr_patient` take `gender`; report_ingestion and the backfill CLI pass `SRContextResult.patient_gender` (from ips via request.pdhc). The write replaces cdr1's Patient, so omitting gender erased it.
 - Needs request.pdhc with the same change. Clear the sr_context cache on deploy.
-- 4 tests in tests/test_patient_demographics.py (mutation-checked). Suite 379 passed, 5 skipped. Not yet deployed.
+- 4 tests in tests/test_patient_demographics.py (mutation-checked). Suite 379 passed, 5 skipped. Deployed 2026-11-20 (overlay, rollback tag :pre_gender); sr_context cache cleared.
 
 ### 2026-11-20 — care_plan_guid forwarded to the CDR
 - `_build_payload` puts the SR context's `care_plan_guid` in `clinical_context` (None when request.pdhc names none or the context is unavailable; delivery never blocks on it). `SRContextResult.care_plan_guid` added. cdr already stores it on clinical_context and observation.
