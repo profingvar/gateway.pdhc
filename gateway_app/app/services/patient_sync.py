@@ -1,6 +1,6 @@
 """Sync patient demographics (ips → CDR1).
 
-Care-delivery dashboards (cd-assist) list a patient by the demographics stored
+Care-delivery dashboards (dashboard.pdhc) list a patient by the demographics stored
 on CDR1's ``patient`` row. Observations alone never create that row, so a
 patient delivering data shows up nameless. This module writes the row.
 
