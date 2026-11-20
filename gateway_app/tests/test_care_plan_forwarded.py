@@ -42,3 +42,13 @@ def test_no_care_plan_in_the_context_forwards_none():
 def test_an_unavailable_context_forwards_none_and_still_delivers():
     cc = _payload(SRContextResult(found=False, error="down"))
     assert cc["care_plan_guid"] is None and cc["service_request_guid"] == "sr-1"
+
+
+def test_the_patients_organisation_is_forwarded():
+    cc = _payload(SRContextResult(found=True, data={"patient_org_guid": "porg-1"}))
+    assert cc["patient_org_guid"] == "porg-1"
+
+
+def test_no_patient_org_in_the_context_forwards_none():
+    assert _payload(SRContextResult(found=True, data={}))["patient_org_guid"] is None
+    assert _payload(SRContextResult(found=False, error="down"))["patient_org_guid"] is None

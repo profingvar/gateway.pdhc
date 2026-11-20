@@ -256,6 +256,7 @@ def _build_payload(log_row):
     sr_requesting_org_guid = None
     sr_requester_user_guid = None
     sr_care_plan_guid = None
+    sr_patient_org_guid = None
     sr_guid = log_row.service_request_guid
     if sr_guid:
         try:
@@ -266,6 +267,7 @@ def _build_payload(log_row):
                 sr_requesting_org_guid = ctx.requesting_org_guid or None
                 sr_requester_user_guid = ctx.requester_user_guid or None
                 sr_care_plan_guid = ctx.care_plan_guid or None
+                sr_patient_org_guid = ctx.patient_org_guid or None
                 if log_row.contract_guid and ctx.requesting_org_guid:
                     contract_scopes = {log_row.contract_guid: {
                         'parties': {'requesting_org_guid': ctx.requesting_org_guid}}}
@@ -311,6 +313,12 @@ def _build_payload(log_row):
             # observation.care_plan_guid had no sender: 0 of 34 rows. None
             # when request.pdhc names none (or predates the field).
             'care_plan_guid': sr_care_plan_guid,
+            # 2026-11-20: the patient's organisation from the same context.
+            # cdr stores it as patient_org_guid, the column every org-scoped
+            # read (Rule 24, the external read door) filters on; without it
+            # gateway's rows reached no org-bound reader. None when request.pdhc
+            # names none, never a guess.
+            'patient_org_guid': sr_patient_org_guid,
         },
     }
 

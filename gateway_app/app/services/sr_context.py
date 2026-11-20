@@ -108,6 +108,13 @@ class SRContextResult:
         return self._data.get('care_plan_guid') or ''
 
     @property
+    def patient_org_guid(self):
+        """The patient's organisation as request.pdhc recorded it on the
+        ServiceRequest (2026-11-20), or ''. cdr scopes reads on it (Rule 24),
+        so a row without it is invisible to every org-bound reader."""
+        return self._data.get('patient_org_guid') or ''
+
+    @property
     def requester_user_guid(self):
         """The user who raised the ServiceRequest (#776). Same story."""
         return self._data.get('requester_user_guid', '')

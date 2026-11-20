@@ -6,6 +6,11 @@ Tracking progress per deployment plan (readme.md). Tests use pytest. Results sto
 
 ## Phase 1 — Foundation
 
+### 2026-11-20 — patient_org_guid forwarded to cdr
+- cdr1 held 40 gateway observations (MMD's client, 19-20 Nov) with patient_org_guid NULL: every org-scoped read (Rule 24, the external read door) skipped them. request.pdhc's SR context already carries `patient_org_guid` and cdr's ingest already stores it; the forwarder dropped it, as it did care_plan_guid.
+- `SRContextResult.patient_org_guid`; forwarder sends `clinical_context.patient_org_guid` (None when request names none, never a guess).
+- 2 tests in tests/test_care_plan_forwarded.py (mutation-checked). Suite 381 passed. Not yet deployed; the 40 existing rows are not backfilled.
+
 ### 2026-11-20 — patient sync writes gender to cdr1
 - `build_patient_resource`/`ensure_cdr_patient` take `gender`; report_ingestion and the backfill CLI pass `SRContextResult.patient_gender` (from ips via request.pdhc). The write replaces cdr1's Patient, so omitting gender erased it.
 - Needs request.pdhc with the same change. Clear the sr_context cache on deploy.
