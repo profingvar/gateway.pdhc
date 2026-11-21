@@ -24,6 +24,7 @@ VALUE_SYSTEM = 'https://plan.pdhc.se/api/v1/lookup/values'
 # there (canonical minus `numeric`); this module used to hand-maintain a second
 # tuple, which is what drifted from the producer.
 from .response_types import is_survey, normalise  # noqa: E402
+from . import data_origin as _origin  # noqa: E402
 
 
 def _unit_fields(base, unit_display, unit_code):
@@ -259,6 +260,16 @@ def build_fhir_observation(row, sr_contexts=None, contract_scopes=None):
                 'identifier': {'value': row.author_org_guid},
             }
         })
+
+    # #1014: patient-generated data, visible on the resource itself so any
+    # FHIR reader sees it without cdr's context row. `performer` is left
+    # alone (it carries the SUBMITTER on this platform, see above).
+    if getattr(row, 'data_origin', None) == _origin.PATIENT_GENERATED:
+        extensions.append({'url': _origin.EXT_URL,
+                           'valueCode': _origin.PATIENT_GENERATED})
+        obs.setdefault('meta', {}).setdefault('tag', []).append({
+            'system': _origin.TAG_SYSTEM, 'code': _origin.TAG_CODE,
+            'display': 'Patient-generated data'})
 
     # Requesting organization (from contract scope)
     req_org = (contract_scope.get('parties') or {}).get('requesting_org_guid')

@@ -55,6 +55,9 @@ class CdrDeliveryLog(db.Model):
     # because only the submitter knows who authored. NULL means the submitter
     # did not say, never "same as provider" — see cdr #665 / analyse ADR-0006.
     author_org_guid = db.Column(db.String(36), nullable=True, index=True)
+    # #1014: 'patient_generated', or NULL = produced/endorsed by healthcare
+    # (opt-in by operator decision). See app/services/data_origin.py.
+    data_origin = db.Column(db.String(32), nullable=True)
     received_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     # Full FHIR R5 Observation resource. After SSOT phase 6 (#285)

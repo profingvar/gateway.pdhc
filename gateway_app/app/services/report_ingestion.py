@@ -48,6 +48,7 @@ from .contract_scope import ContractScopeService
 from .patient_sync import ensure_cdr_patient
 from .observation_validator import ObservationValidator
 from .sso_service import current_session_id
+from . import data_origin as _origin
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,12 @@ class ReportIngestionService:
         # data, when that is not itself. Optional — every existing integration
         # keeps working unchanged and simply leaves it NULL.
         report_author_org_guid = body.get('author_org_guid')
+        # #1014: OPT-IN patient-generated flag, report level (each
+        # observation may also carry its own). Refused before anything is
+        # fetched or stored when it is not a value cdr accepts.
+        report_data_origin, _origin_err = _origin.check(body.get('data_origin'))
+        if _origin_err:
+            raise APIError(_origin_err, code='VALIDATION_ERROR', status_code=422)
 
         # Backward compat: accept patient/org/contract from body for cross-check.
         # #294/#301: canonical wire key is `provider_org_guid`; legacy
@@ -185,7 +192,7 @@ class ReportIngestionService:
             return _store_questionnaire_response(
                 service_request_guid, patient_guid, provider_org_guid,
                 contract_guid, grant_token, report_payload, status,
-                is_late=is_late,
+                is_late=is_late, data_origin=report_data_origin,
             )
 
         # ── Step 5b: Extract and enrich observations ──────────────
@@ -271,6 +278,22 @@ class ReportIngestionService:
                             obs['procedure_concept_guid'] = txn.get('concept_guid')
 
                 validation = ObservationValidator.validate_observations(obs_list)
+                # #1014: a per-observation data_origin must be valid too.
+                _origin_errs = [f'observations[{_i}]: {_e}'
+                                for _i, _o in enumerate(obs_list)
+                                if isinstance(_o, dict)
+                                for _e in [_origin.check(_o.get('data_origin'))[1]]
+                                if _e]
+                if _origin_errs:
+                    _audit_rejection(service_request_guid, patient_guid,
+                                     provider_org_guid, contract_guid,
+                                     'VALIDATION_ERROR', _origin_errs)
+                    raise APIError(
+                        'Observation validation failed',
+                        code='VALIDATION_ERROR',
+                        status_code=422,
+                        details=_origin_errs,
+                    )
                 if not validation.valid:
                     _audit_rejection(service_request_guid, patient_guid,
                                      provider_org_guid, contract_guid,
@@ -481,6 +504,10 @@ class ReportIngestionService:
                     # from a value the submitter actually declared.
                     author_org_guid=(obs.get('author_org_guid')
                                      or report_author_org_guid),
+                    # #1014: per observation, else per report, else NULL
+                    # (= healthcare). Validated at Step 5b.
+                    data_origin=(_origin.check(obs.get('data_origin'))[0]
+                                 or report_data_origin),
                     payload_hash=payload_hash,
                     dedup_key=dedup_key,
                     received_at=datetime.now(timezone.utc),
@@ -502,6 +529,7 @@ class ReportIngestionService:
                 contract_guid=contract_guid,
                 provider_org_guid=provider_org_guid,
                 author_org_guid=report_author_org_guid,   # #666
+                data_origin=report_data_origin,           # #1014
                 payload_hash=payload_hash,
                 received_at=datetime.now(timezone.utc),
                 fhir_observation_json=report_payload,
@@ -603,7 +631,7 @@ def _outside_scale(obs):
 def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                                   contract_guid, grant_token,
                                   report_payload, status,
-                                  is_late=False):
+                                  is_late=False, data_origin=None):
     """Store a FHIR QuestionnaireResponse, extracting each item as a
     separate InboundObservation so downstream display and analysis can
     work with individual answers instead of one opaque blob.
@@ -642,6 +670,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
         service_request_guid=sr_guid,
         contract_guid=contract_guid,
         provider_org_guid=org_guid,
+        data_origin=data_origin,                  # #1014
         payload_hash=payload_hash,
         received_at=datetime.now(timezone.utc),
         fhir_observation_json=report_payload,
@@ -682,6 +711,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                 concept_guid=concept_code or link_id,
                 contract_guid=contract_guid,
                 provider_org_guid=org_guid,
+                data_origin=data_origin,          # #1014: a PROM answer is PGD
                 received_at=datetime.now(timezone.utc),
                 fhir_observation_json={
                     'linkId': link_id,

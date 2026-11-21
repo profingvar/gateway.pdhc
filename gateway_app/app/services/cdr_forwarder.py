@@ -299,6 +299,9 @@ def _build_payload(log_row):
             # existed — during a rolling deploy, or a backlog. Matching the
             # builder, which is defensive for the same reason.
             'author_org_guid': getattr(log_row, 'author_org_guid', None),
+            # #1014: 'patient_generated' or None (= healthcare). getattr for
+            # rows queued before the column existed, as above.
+            'data_origin': getattr(log_row, 'data_origin', None),
             # #776. Fetched above from request.pdhc, not stored on the delivery
             # log — `cdr_delivery_log` has no plan_definition_guid column — so a
             # delivery retried after its ServiceRequest is archived legitimately
