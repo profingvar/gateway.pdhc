@@ -287,3 +287,9 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/fhir_observation_builder.py — meta.tag + extension
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/migrations/versions/c3d5e7f9a1b4_1014_data_origin.py (NEW)
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_data_origin_1014.py (NEW)
+
+## 2026-11-21 — #1014 PAT-scope enforcement
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/data_origin.py — PAT_SCOPE, forced_by_credential
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/report_ingestion.py — the credential forces the flag
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_data_origin_1014.py (+3)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/docs/patient_generated_data.md (NEW)

@@ -6,6 +6,11 @@ Tracking progress per deployment plan (readme.md). Tests use pytest. Results sto
 
 ## Phase 1 — Foundation
 
+### 2026-11-21 — #1014 enforced from the credential, deployed
+- A PAT with scope `patient_generated` (a patient-facing client) gets data_origin on EVERY observation it submits, QR answers included; the body cannot omit or change it. Healthcare PATs keep the opt-in. No request.pdhc change (scopes are free-form, kept on rotation).
+- Contract for the patient app: docs/patient_generated_data.md. 3 new tests (the enforcement test fails with it removed); suite 392.
+- Deployed 2026-11-21 (overlay, image tag `gateway_app-app:pre_origin2`, pg_dump in ~/backups/predeploy/origin2_gw/). No migration. Health 200, hashes ok, live in-container check ok, smoke --all green before and after.
+
 ### 2026-11-21 — #1014 data_origin (patient-generated) accepted and forwarded
 - Opt-in: `data_origin = "patient_generated"` per observation or per report (QR answers included); absent = produced/endorsed by healthcare. Any other value → 422 before anything is stored.
 - cdr_delivery_log.data_origin (migration c3d5e7f9a1b4); forwarded in clinical_context; FHIR Observation gets meta.tag `urn:pdhc:fhir:CodeSystem:data-origin|patient-generated` + extension `urn:pdhc:fhir:extension:data-origin`. performer unchanged.
