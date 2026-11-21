@@ -6,6 +6,13 @@ Tracking progress per deployment plan (readme.md). Tests use pytest. Results sto
 
 ## Phase 1 — Foundation
 
+### 2026-11-21 — #1014 data_origin (patient-generated) accepted and forwarded
+- Opt-in: `data_origin = "patient_generated"` per observation or per report (QR answers included); absent = produced/endorsed by healthcare. Any other value → 422 before anything is stored.
+- cdr_delivery_log.data_origin (migration c3d5e7f9a1b4); forwarded in clinical_context; FHIR Observation gets meta.tag `urn:pdhc:fhir:CodeSystem:data-origin|patient-generated` + extension `urn:pdhc:fhir:extension:data-origin`. performer unchanged.
+- 8 tests (7 fail with the fix reverted). Suite 389 passed.
+- Deployed 2026-11-21 (overlay, image tag `gateway_app-app:pre_origin`, pg_dump in ~/backups/predeploy/origin_gw/). Migration applied, health 200, hashes ok, smoke --all green before and after. 0 of 196 existing rows flagged (all healthcare).
+- Known gap: the flag is declared. When the patient app has its own credential, gateway should set it from the authenticated client.
+
 ### 2026-11-20 — patient_org_guid forwarded to cdr
 - cdr1 held 40 gateway observations (MMD's client, 19-20 Nov) with patient_org_guid NULL: every org-scoped read (Rule 24, the external read door) skipped them. request.pdhc's SR context already carries `patient_org_guid` and cdr's ingest already stores it; the forwarder dropped it, as it did care_plan_guid.
 - `SRContextResult.patient_org_guid`; forwarder sends `clinical_context.patient_org_guid` (None when request names none, never a guess).

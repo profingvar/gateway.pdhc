@@ -278,3 +278,12 @@ false for 11 files; a hand survey cannot be the gate here.
 ## 2026-11-19 — OUT_OF_SCALE
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/report_ingestion.py — step 6b drops values outside the concept scale
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_out_of_scale.py (NEW)
+
+## 2026-11-21 — #1014 data_origin
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/data_origin.py (NEW)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/models/cdr_delivery_log.py — data_origin column
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/report_ingestion.py — accept/validate per obs + report, QR path
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/cdr_forwarder.py — forwards data_origin
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/fhir_observation_builder.py — meta.tag + extension
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/migrations/versions/c3d5e7f9a1b4_1014_data_origin.py (NEW)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_data_origin_1014.py (NEW)
