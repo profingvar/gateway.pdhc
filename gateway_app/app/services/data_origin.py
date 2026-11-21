@@ -7,7 +7,7 @@ at this hop with 422, so a misspelt flag never silently turns patient data
 into healthcare data.
 
 ENFORCED FROM THE CREDENTIAL. A PAT carrying the scope `patient_generated`
-(issued by request.pdhc, e.g. `flask register-pat --scopes
+(issued by request.pdhc, e.g. `flask provider register-pat --scopes
 read,write,patient_generated`) belongs to a patient-facing client: EVERY
 observation it submits is stored as patient-generated, whatever the body says
 or omits, the same way provider_org_guid comes from the PAT and never from the

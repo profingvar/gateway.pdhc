@@ -24,7 +24,7 @@ Nothing is stored.
 Issue the patient app's PAT with the extra scope `patient_generated`
 (request.pdhc):
 
-    flask register-pat --org-guid <org> --contract-guid <contract> \
+    flask provider register-pat --org-guid <org> --contract-guid <contract> \
         --scopes read,write,patient_generated
 
 Gateway then sets `data_origin = "patient_generated"` on **every** observation
