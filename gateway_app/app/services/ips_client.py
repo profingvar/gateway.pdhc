@@ -26,6 +26,36 @@ import requests
 from flask import current_app
 
 
+# ---------------------------------------------------------------------------
+# #1025 — where the EPS address and key come from
+# ---------------------------------------------------------------------------
+#
+# ips.pdhc is being renamed eps.pdhc (epic #1015, phase 3). EPS_BASE_URL /
+# EPS_API_KEY are read FIRST; IPS_BASE_URL / IPS_API_KEY are the DEPRECATED
+# fallback, kept until ips' per-caller counter shows no traffic to the old
+# name. Every read goes through eps_env(), so the precedence lives here only.
+# The Flask config keys (IPS_*, set by tests) keep their names. There is NO
+# default: both names empty is unset, and the client fetches nothing, exactly
+# as before (#833).
+
+EPS_SETTING_SUFFIXES = ("BASE_URL", "API_KEY")
+
+
+def eps_env(suffix: str) -> str:
+    """``EPS_<suffix>`` if non-empty, else ``IPS_<suffix>``, else ``""``."""
+    if suffix not in EPS_SETTING_SUFFIXES:
+        raise KeyError(f"not an EPS setting: {suffix!r}")
+    return os.environ.get(f"EPS_{suffix}", "") or os.environ.get(f"IPS_{suffix}", "")
+
+
+def eps_setting(suffix: str, config=None) -> str:
+    """``config["IPS_<suffix>"]`` if set, else the environment (``eps_env``).
+    ``config`` defaults to ``current_app.config``."""
+    if config is None:
+        config = current_app.config
+    return config.get(f"IPS_{suffix}") or eps_env(suffix)
+
+
 DEFAULT_TTL_SECONDS = 30
 DEFAULT_TIMEOUT = 4.0
 
@@ -68,10 +98,8 @@ class IpsClient:
     ):
         self.token = token
         self.service_key = service_key
-        self.api_key = api_key or os.environ.get("IPS_API_KEY", "") or None
-        self.base_url = (
-            base_url or os.environ.get("IPS_BASE_URL", "")
-        ).rstrip("/")
+        self.api_key = api_key or eps_env("API_KEY") or None
+        self.base_url = (base_url or eps_env("BASE_URL")).rstrip("/")
         self.timeout = timeout
 
     def _headers(self) -> dict:
@@ -198,10 +226,8 @@ def _default_client() -> IpsClient:
     scoped, not caller-scoped)."""
     return IpsClient(
         service_key=current_app.config.get("GATEWAY_PDHC_SERVICE_KEY") or None,
-        base_url=current_app.config.get("IPS_BASE_URL")
-        or os.environ.get("IPS_BASE_URL") or None,
-        api_key=current_app.config.get("IPS_API_KEY")
-        or os.environ.get("IPS_API_KEY") or None,
+        base_url=eps_setting("BASE_URL") or None,
+        api_key=eps_setting("API_KEY") or None,
     )
 
 

@@ -293,3 +293,10 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/report_ingestion.py — the credential forces the flag
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_data_origin_1014.py (+3)
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/docs/patient_generated_data.md (NEW)
+
+## 2026-11-21 — #1025 EPS rename phase 3: EPS_* first, IPS_* fallback (NOT deployed)
+- gateway_app/app/services/ips_client.py — eps_env/eps_setting helper (EPS_<x> else IPS_<x> else "", no default); constructor + _default_client use it
+- gateway_app/.env.example — EPS_BASE_URL/EPS_API_KEY section; IPS_* marked deprecated fallback
+- gateway_app/docs/gateway_technical_guide.md — dependency row + config block
+- deploy/smoke_siblings.py — resolves the EPS address with the client's own helper
+- gateway_app/tests/test_eps_settings_1025.py (NEW)

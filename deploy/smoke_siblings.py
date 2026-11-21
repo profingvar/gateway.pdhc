@@ -88,15 +88,14 @@ def main(as_json: bool = False) -> int:
         req_key = cfg.get("REQUEST_INTERNAL_SERVICE_KEY", "")
         req = (cfg.get("REQUEST_SERVICE_URL") or "").rstrip("/")
         cdr = (cfg.get("CDR_BASE_URL") or "").rstrip("/")
-        # IPS_BASE_URL is the one sibling URL gateway does NOT register in
-        # app.config: ips_client resolves it as
-        # `config.get(...) or os.environ.get(...)`, deliberately, in both the
-        # from_config call site and the constructor. Resolved the same way
-        # here — checking only app.config reported a missing URL that is in
-        # fact present and working, which is a smoke lying about production.
-        import os as _os
-        ips = (cfg.get("IPS_BASE_URL")
-               or _os.environ.get("IPS_BASE_URL") or "").rstrip("/")
+        # The EPS address is the one sibling URL gateway does NOT register in
+        # app.config: ips_client resolves it as config, else the environment,
+        # deliberately. Resolved by the client's own helper here — checking
+        # only app.config reported a missing URL that is in fact present and
+        # working, which is a smoke lying about production. Since #1025 the
+        # environment is EPS_BASE_URL first, IPS_BASE_URL as the fallback.
+        from app.services.ips_client import eps_setting
+        ips = eps_setting("BASE_URL", cfg).rstrip("/")
         sso = (cfg.get("SSO_BASE_URL") or "").rstrip("/")
         ana = (cfg.get("ANALYSE_BASE_URL") or "").rstrip("/")
 
@@ -146,7 +145,7 @@ def main(as_json: bool = False) -> int:
         @check("config: every sibling URL and key is set")
         def _():
             want = {"CDR_BASE_URL": cdr, "REQUEST_SERVICE_URL": req,
-                    "IPS_BASE_URL (config or env)": ips, "SSO_BASE_URL": sso,
+                    "EPS_BASE_URL / IPS_BASE_URL (config or env)": ips, "SSO_BASE_URL": sso,
                     "ANALYSE_BASE_URL": ana,
                     "GATEWAY_PDHC_SERVICE_KEY": svc,
                     "REQUEST_INTERNAL_SERVICE_KEY": req_key}
@@ -207,7 +206,7 @@ def main(as_json: bool = False) -> int:
             # Driven through IpsClient rather than a hand-rolled request. My
             # first version sent `Bearer <GATEWAY_PDHC_SERVICE_KEY>` and got a
             # 401 that looked like a finding; the client actually presents
-            # `ApiKey <IPS_API_KEY>`, because ips reads ONLY Authorization and
+            # `ApiKey <EPS_API_KEY, else IPS_API_KEY>`, because ips reads ONLY Authorization and
             # a service key is not an ips credential. Using the client means
             # the smoke cannot disagree with production about which
             # credential is correct — which is the entire point of #708.
