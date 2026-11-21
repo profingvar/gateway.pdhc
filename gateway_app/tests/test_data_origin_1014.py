@@ -110,3 +110,46 @@ def test_fhir_observation_is_tagged_only_when_patient_generated():
     plain = build_fhir_observation(_row(), {}, {})
     assert not (plain.get('meta') or {}).get('tag')
     assert data_origin.EXT_URL not in {e['url'] for e in plain.get('extension', [])}
+
+
+# --- enforced from the credential -------------------------------------------
+
+def _post_as_patient_app(client, body, sr='sr-origin'):
+    """Same upstream mocks, but the PAT carries the patient_generated scope."""
+    from app.services.pat_validation import PATValidationService, PATValidationResult
+    real = PATValidationService.validate
+
+    def validate(raw):
+        r = real(raw)
+        if r.valid:
+            r.scopes = (r.scopes or 'read,write') + ',patient_generated'
+        return r
+    p = _patch_all_upstreams()
+    with p[0], p[1], p[2], p[3], \
+         patch.object(PATValidationService, 'validate', side_effect=validate):
+        return client.post(f'/api/v1/provider/report/{sr}', json=body,
+                           headers={'X-Provider-Token': 'valid-token'})
+
+
+def test_patient_app_pat_flags_everything_even_when_body_omits_it(client, app, db):
+    r = _post_as_patient_app(client, _make_minimal_body())
+    assert r.status_code == 202, r.get_json()
+    assert _origins(app) == {'tx-001': 'patient_generated',
+                             'tx-002': 'patient_generated'}
+
+
+def test_patient_app_pat_still_refuses_an_unknown_value(client, app, db):
+    body = _make_minimal_body()
+    body['data_origin'] = 'healthcare'
+    r = _post_as_patient_app(client, body)
+    assert r.status_code == 422, r.get_json()
+    assert _origins(app) == {}
+
+
+def test_forced_by_credential_contract():
+    from app.services.pat_validation import PATValidationResult
+    assert data_origin.forced_by_credential(
+        PATValidationResult(valid=True, scopes='read,write,patient_generated')) == 'patient_generated'
+    assert data_origin.forced_by_credential(
+        PATValidationResult(valid=True, scopes='read,write')) is None
+    assert data_origin.forced_by_credential(None) is None

@@ -6,9 +6,13 @@ absent means produced or endorsed by healthcare. Any other value is refused
 at this hop with 422, so a misspelt flag never silently turns patient data
 into healthcare data.
 
-Known gap: the flag is DECLARED by the submitter. When the patient app has
-its own credential, gateway should SET it from the authenticated client, as
-provider_org_guid comes from the PAT.
+ENFORCED FROM THE CREDENTIAL. A PAT carrying the scope `patient_generated`
+(issued by request.pdhc, e.g. `flask register-pat --scopes
+read,write,patient_generated`) belongs to a patient-facing client: EVERY
+observation it submits is stored as patient-generated, whatever the body says
+or omits, the same way provider_org_guid comes from the PAT and never from the
+body. A patient app therefore cannot forget the flag. A healthcare PAT may
+still declare it per observation or per report (opt-in).
 """
 from __future__ import annotations
 
@@ -19,6 +23,16 @@ VALUES = (PATIENT_GENERATED,)
 TAG_SYSTEM = 'urn:pdhc:fhir:CodeSystem:data-origin'
 TAG_CODE = 'patient-generated'
 EXT_URL = 'urn:pdhc:fhir:extension:data-origin'
+
+
+#: The PAT scope that marks a patient-facing client (#1014).
+PAT_SCOPE = 'patient_generated'
+
+
+def forced_by_credential(pat_result) -> str | None:
+    """PATIENT_GENERATED when the authenticated PAT is a patient client."""
+    has = getattr(pat_result, 'has_scope', None)
+    return PATIENT_GENERATED if callable(has) and has(PAT_SCOPE) else None
 
 
 def check(value):

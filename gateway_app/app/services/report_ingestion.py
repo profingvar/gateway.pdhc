@@ -80,6 +80,11 @@ class ReportIngestionService:
         report_data_origin, _origin_err = _origin.check(body.get('data_origin'))
         if _origin_err:
             raise APIError(_origin_err, code='VALIDATION_ERROR', status_code=422)
+        # A patient-client PAT forces the flag on everything it submits; the
+        # body can neither omit nor change it (only one value exists).
+        forced_origin = _origin.forced_by_credential(getattr(g, 'pat_result', None))
+        if forced_origin:
+            report_data_origin = forced_origin
 
         # Backward compat: accept patient/org/contract from body for cross-check.
         # #294/#301: canonical wire key is `provider_org_guid`; legacy
@@ -506,7 +511,8 @@ class ReportIngestionService:
                                      or report_author_org_guid),
                     # #1014: per observation, else per report, else NULL
                     # (= healthcare). Validated at Step 5b.
-                    data_origin=(_origin.check(obs.get('data_origin'))[0]
+                    data_origin=(forced_origin
+                                 or _origin.check(obs.get('data_origin'))[0]
                                  or report_data_origin),
                     payload_hash=payload_hash,
                     dedup_key=dedup_key,
