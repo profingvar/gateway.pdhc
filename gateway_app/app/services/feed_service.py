@@ -42,6 +42,11 @@ class FeedService:
             params['limit'] = flask_request.args['limit']
         if flask_request.args.get('cursor'):
             params['cursor'] = flask_request.args['cursor']
+        # #1043: narrow to one patient's orders (the patient app polls per
+        # logged-in patient). request.pdhc applies it inside the PAT's own
+        # matches, so it can only ever return fewer items.
+        if flask_request.args.get('patient_guid'):
+            params['patient_guid'] = flask_request.args['patient_guid']
 
         try:
             resp = http_requests.get(

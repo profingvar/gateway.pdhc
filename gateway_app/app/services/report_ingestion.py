@@ -49,6 +49,7 @@ from .patient_sync import ensure_cdr_patient
 from .observation_validator import ObservationValidator
 from .sso_service import current_session_id
 from . import data_origin as _origin
+from . import review as _review
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,31 @@ class ReportIngestionService:
         forced_origin = _origin.forced_by_credential(getattr(g, 'pat_result', None))
         if forced_origin:
             report_data_origin = forced_origin
+
+        # #1043 (contract s3.2): does this report ask for care's review? Only
+        # a patient-generated credential may; anyone else is refused BY NAME,
+        # before anything is fetched or stored — never accepted with the
+        # marker silently dropped.
+        review_required, _review_err = _review.claim(body)
+        if _review_err:
+            raise APIError(
+                '`review_required` must be the JSON boolean true or false',
+                code=_review_err, status_code=422)
+        if review_required and not forced_origin:
+            _audit_rejection(service_request_guid, body.get('patient_guid'),
+                             g.provider_org_guid, body.get('contract_guid'),
+                             _review.REFUSED_NOT_PATIENT_GENERATED,
+                             'review claimed by a PAT without scope patient_generated')
+            raise APIError(
+                'This report asks for review (it answers the EPS form, carries '
+                'the eps-review tag, or sets review_required), and review '
+                'exists only for patient-generated data: the access token '
+                'must carry the scope `patient_generated`.',
+                code=_review.REFUSED_NOT_PATIENT_GENERATED, status_code=403)
+        if review_required and not _review.is_questionnaire_response(report_payload):
+            raise APIError(
+                'review_required applies to a FHIR QuestionnaireResponse only',
+                code=_review.REFUSED_NOT_A_QUESTIONNAIRE_RESPONSE, status_code=422)
 
         # Backward compat: accept patient/org/contract from body for cross-check.
         # #294/#301: canonical wire key is `provider_org_guid`; legacy
@@ -194,10 +220,26 @@ class ReportIngestionService:
 
         # ── Step 5a: FHIR QuestionnaireResponse — store directly ────
         if isinstance(report_payload, dict) and report_payload.get('resourceType') == 'QuestionnaireResponse':
+            if review_required and not sr_context.patient_org_guid:
+                # The CDR scopes the review queue on the PATIENT's
+                # organisation. A pending answer stored without it can be
+                # decided by nobody, so it is not accepted without it.
+                # Retryable: nothing has been stored.
+                _audit_rejection(service_request_guid, patient_guid,
+                                 provider_org_guid, contract_guid,
+                                 _review.REFUSED_NO_PATIENT_ORG,
+                                 'SR context carries no patient_org_guid')
+                raise APIError(
+                    "The patient's organisation could not be established for "
+                    'this ServiceRequest, and an answer awaiting review cannot '
+                    'be stored without it. Nothing was stored; retry.',
+                    code=_review.REFUSED_NO_PATIENT_ORG, status_code=503)
             return _store_questionnaire_response(
                 service_request_guid, patient_guid, provider_org_guid,
                 contract_guid, grant_token, report_payload, status,
                 is_late=is_late, data_origin=report_data_origin,
+                review_required=review_required,
+                patient_org_guid=sr_context.patient_org_guid or None,
             )
 
         # ── Step 5b: Extract and enrich observations ──────────────
@@ -637,7 +679,8 @@ def _outside_scale(obs):
 def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                                   contract_guid, grant_token,
                                   report_payload, status,
-                                  is_late=False, data_origin=None):
+                                  is_late=False, data_origin=None,
+                                  review_required=False, patient_org_guid=None):
     """Store a FHIR QuestionnaireResponse, extracting each item as a
     separate InboundObservation so downstream display and analysis can
     work with individual answers instead of one opaque blob.
@@ -646,6 +689,14 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
     holding the full QR resource, plus one child record per answered item
     (response_type set per answer type — CANONICAL values only since #871; see
     app/services/response_types.py, which owns the vocabulary).
+
+    #1043 — NESTED items are walked (`_walk_qr_items`): a group's fields are
+    extracted with their own linkId, and each instance of a group gets a
+    `group` id shared by its fields. With `review_required` (the patient EPS
+    form, contract s3.2) every child is forwardable keyed by its linkId even
+    without an item `code`, and carries the marker, the linkId, the group and
+    the patient's organisation in its own JSON — the forwarder builds the CDR
+    context from the row alone.
 
     NOTE the parent is `status='skipped'` and its fhir_observation_json is the
     raw report payload: it carries no response_type and never reaches the
@@ -686,13 +737,24 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
     db.session.add(parent)
     db.session.flush()  # populate parent.guid for child back-references
 
-    # Extract individual items as child observations
-    items = report_payload.get('item', [])
+    # Extract individual items as child observations — nested ones too.
+    leaves = list(_walk_qr_items(report_payload.get('item'), parent.guid))
+    if review_required:
+        # A review answer is keyed by its linkId in String(36) columns, here
+        # and in the CDR. Refused by name rather than truncated or 500'd.
+        bad = sorted({str(i.get('linkId') or '') for i, _ in leaves
+                      if not i.get('linkId')
+                      or len(str(i['linkId'])) > _review.MAX_LINK_ID})
+        if bad:
+            db.session.rollback()
+            raise APIError(
+                f'Every answered item needs a linkId of at most '
+                f'{_review.MAX_LINK_ID} characters when the report is for review',
+                code=_review.REFUSED_LINK_ID, status_code=422,
+                details=[{'linkId': b} for b in bad])
     stored_items = []
-    for item in items:
-        answers = item.get('answer', [])
-        if not answers:
-            continue
+    for item, group in leaves:
+        answers = item.get('answer') or []
 
         link_id = item.get('linkId', '')
         text = item.get('text', '')
@@ -701,7 +763,8 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
         concept_display = codes[0].get('display', '') if codes else text
 
         for answer in answers:
-            value, response_type = _extract_qr_answer(answer)
+            value, response_type = _extract_qr_answer(
+                answer, prefer_code=review_required)
             if value is None:
                 continue
 
@@ -719,19 +782,20 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
                 provider_org_guid=org_guid,
                 data_origin=data_origin,          # #1014: a PROM answer is PGD
                 received_at=datetime.now(timezone.utc),
-                fhir_observation_json={
-                    'linkId': link_id,
-                    'text': text,
-                    'concept_code': concept_code,
-                    'concept_display': concept_display,
-                    'answer': answer,
-                    'questionnaire': report_payload.get('questionnaire', ''),
-                    'parent_guid': parent.guid,
-                    'value': value,
-                    'response_type': response_type,
-                },
+                fhir_observation_json=_qr_child_json(
+                    link_id, text, concept_code, concept_display, answer,
+                    report_payload.get('questionnaire', ''), parent.guid,
+                    value, response_type, group=group,
+                    review_required=review_required,
+                    patient_org_guid=patient_org_guid),
                 operator_session_id=current_session_id(),  # X2 #408
-                status=('pending' if concept_code else 'skipped'),
+                # Without an item `code` there is no concept, and the row is
+                # stored but not forwarded — EXCEPT a review answer (#1043):
+                # the EPS form's items carry no code by design ("the form
+                # codes nothing"), and an answer that never reaches the CDR
+                # can never be reviewed. It goes keyed by its linkId.
+                status=('pending' if (concept_code or review_required)
+                        else 'skipped'),
             )
             db.session.add(child)
             db.session.flush()
@@ -751,6 +815,7 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
             'response_type': 'QuestionnaireResponse',
             'questionnaire': report_payload.get('questionnaire', ''),
             'items_extracted': len(stored_items),
+            'review_required': bool(review_required),
             'status': status,
             'payload_hash': payload_hash,
             'is_late': is_late,
@@ -771,13 +836,91 @@ def _store_questionnaire_response(sr_guid, patient_guid, org_guid,
         'items_extracted': len(stored_items),
         'is_late': is_late,
         'action': 'created',
+        # #1043: said back to the submitter, so "stored for review" is never
+        # an assumption on its side.
+        **({'review_required': True} if review_required else {}),
     }
 
 
-def _extract_qr_answer(answer):
+def _walk_qr_items(items, receipt_guid):
+    """Yield ``(item, group)`` for every ANSWERED item of a
+    QuestionnaireResponse, at any depth (#1043).
+
+    Until #1043 only top-level items were read, so the fields of a group —
+    every field of the patient EPS form's repeating `<section>.entry` — were
+    dropped without a word.
+
+    ``group`` identifies the INSTANCE of the nearest enclosing group: the
+    same for all fields of one entry, different between entries, and unique
+    to this report (``<receipt guid>/<n>``, n counting group instances in
+    document order) so two submissions never share one. ``None`` for an item
+    outside any group. Items nested under an ANSWER are walked too and keep
+    the group they are in.
+    """
+    counter = [0]
+
+    def walk(nodes, group):
+        for item in nodes or []:
+            if not isinstance(item, dict):
+                continue
+            answers = [a for a in (item.get('answer') or []) if isinstance(a, dict)]
+            if answers:
+                yield item, group
+                for a in answers:
+                    yield from walk(a.get('item'), group)
+            children = item.get('item')
+            if children:
+                inner = group
+                if not answers:          # a group: one instance, one id
+                    counter[0] += 1
+                    inner = f'{receipt_guid}/{counter[0]}'
+                yield from walk(children, inner)
+
+    yield from walk(items, None)
+
+
+def _qr_child_json(link_id, text, concept_code, concept_display, answer,
+                   questionnaire, parent_guid, value, response_type, *,
+                   group=None, review_required=False, patient_org_guid=None):
+    """The JSON stored on one extracted answer's delivery row.
+
+    The first nine keys are the pre-#1043 shape. The forwarder reads the rest
+    from HERE and nowhere else — the row is the only thing that crosses the
+    queue between this request and the delivery to the CDR.
+    """
+    doc = {
+        'linkId': link_id,
+        'text': text,
+        'concept_code': concept_code,
+        'concept_display': concept_display,
+        'answer': answer,
+        'questionnaire': questionnaire,
+        'parent_guid': parent_guid,
+        'value': value,
+        'response_type': response_type,
+    }
+    if group:
+        doc['group'] = group
+    if review_required:
+        doc['review_required'] = True
+        # The label a reviewer reads: the CDR takes it from
+        # Observation.code.text, which the builder fills from concept_name.
+        doc['concept_name'] = concept_display or text or link_id
+        # Captured now, while request.pdhc has just answered, so a delivery
+        # retried when it cannot be asked still carries it.
+        doc['patient_org_guid'] = patient_org_guid
+    return doc
+
+
+def _extract_qr_answer(answer, prefer_code=False):
     """Extract (value, response_type) from a FHIR QuestionnaireResponse answer.
 
     Returns (None, None) for unsupported answer types.
+
+    ``prefer_code`` (#1043, review answers): a coded answer is stored as its
+    CODE rather than its display. eps reads `has` / `none` / `unknown` and
+    `mild` / `severe` from the value; a translated display would not be
+    recognised there.
     """
     if 'valueDecimal' in answer:
         return answer['valueDecimal'], 'numeric'
@@ -802,6 +945,8 @@ def _extract_qr_answer(answer):
         # "100" was written to the clinical store as a valueQuantity — a
         # NUMBER where a code belonged.
         coding = answer['valueCoding']
+        if prefer_code and coding.get('code'):
+            return str(coding['code']), 'categorical'
         return coding.get('display', coding.get('code', '')), 'categorical'
     if 'valueQuantity' in answer:
         q = answer['valueQuantity']

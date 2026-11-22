@@ -1056,3 +1056,16 @@ shape as the ones #871 is about:
 - **Tests.** `tests/test_sparr_fail_closed_1047.py`, 41 tests through the real route, only `requests.get` patched. Against the pre-change code 35 fail (the 6 that pass are the unchanged behaviours: auth, 200-empty, 404, `blocks`/`entry` parse, good answer cached). 13 mutations of the new code each fail the tests written for them. Suite: 407 passed / 5 skipped before, 448 passed / 5 skipped after.
 - **Seven older tests were passing BECAUSE of the defect** (`test_observations_endpoint`, `test_audit_granularity`): eps is unset under test and "unset" came back as an empty block list. They now state "no blocks" on purpose (autouse fixture in those two modules).
 - **Consequence when deployed.** With eps answering gateway's key (verified by the coordinator), behaviour changes only where it should: real blocks now apply, and an eps outage withholds rows for its duration instead of showing them unfiltered. `deploy/smoke_siblings.py`'s eps check now FAILS (raises) on a 401/403 instead of passing on an empty list.
+
+
+## 2026-11-22 — #1043 patient app: EPS review marker, nested forms, feed filter (NOT deployed)
+
+Measured first (epic #1039): feed and download are pure proxies of request.pdhc, so their content was added there (request.pdhc ec2ae0f). In gateway:
+- **QuestionnaireResponse extraction read top-level items only** and marked a child without an item `code` as `skipped`. The patient EPS form nests every field one level down in a repeating `<section>.entry` group and codes nothing, so NOTHING from it would have reached the CDR.
+- **Now:** nested items are walked; each group instance gets a `group` id (`<receipt guid>/<n>`); a review report's children are forwarded keyed by linkId, with `review_required: true`, `link_id`, `group`, `data_origin` and `patient_org_guid` in `clinical_context`. Coded answers of a review report are stored as their code.
+- **Review claim** = EPS canonical, or the `eps-review` tag, or body `review_required: true`. From a PAT without `patient_generated`: 403 `REVIEW_REQUIRES_PATIENT_GENERATED`, nothing stored.
+- **Never forwarded without the patient's organisation:** refused 503 at ingest when request.pdhc names none; captured on the row; the forwarder holds and retries if it still has none.
+- Feed proxy forwards `?patient_guid=` and the audit row names the patient.
+- Tests: `tests/test_eps_review_1043.py`, 30, through the real report route with auth ON and the REAL form (`tests/fixtures/eps_patient_v1.json`, byte copy, drift-guarded); only `requests.get/post` patched. 22 of 29 fail against the old ingestion/forwarder code; 27 mutations each fail their tests. Suite 448 -> 478 passed, 5 skipped.
+- Seam check (scratch, not committed): the 11 payloads gateway produces for the form were posted to cdr.pdhc's real ingest (local test app, 438d6e3): 11 x 202, all `review_status = pending`, `patient_generated`, patient org and `group` stored.
+- Known: a retried review delivery that exhausts the 5-attempt budget ends `failed` like any other row and needs a manual requeue. The label sent is the item `text` from the response; if the client sends none, the linkId is the label.

@@ -26,8 +26,26 @@ from .cdr_client import CdrClient, CdrRejected, CdrUnavailable
 from .fhir_observation_builder import build_fhir_observation, build_canonical_observation
 from .response_types import UnknownResponseType
 from .sr_context import SRContextService
+from . import data_origin as _origin
 
 logger = logging.getLogger(__name__)
+
+class ReviewContextIncomplete(Exception):
+    """A review answer (#1043) cannot be forwarded as it stands.
+
+    ``terminal`` False: the patient's organisation is not known right now
+    (request.pdhc could not be asked and the row carries none). The CDR
+    scopes the review queue on it, so a pending answer forwarded without it
+    could be decided by nobody — the delivery is retried instead.
+
+    ``terminal`` True: the row is marked for review but is not
+    patient-generated. That cannot be delivered truthfully either way.
+    """
+
+    def __init__(self, message, terminal=False):
+        super().__init__(message)
+        self.terminal = terminal
+
 
 MAX_ATTEMPTS = 5
 BASE_BACKOFF = 10  # seconds
@@ -116,6 +134,14 @@ def run_forwarding_cycle(app):
                         'attempt_count': log.attempt_count,
                     },
                 ))
+            except ReviewContextIncomplete as e:
+                # #1043: named, not a traceback. Retryable keeps the normal
+                # retry budget; the row is never delivered without the field.
+                logger.error("Forwarding %s held: %s", log.guid, e)
+                if e.terminal:
+                    _mark_failed_terminal(log, str(e))
+                else:
+                    _mark_retryable(log, str(e))
             except Exception as e:
                 logger.exception("Forwarding %s failed: %s", log.guid, e)
                 _mark_retryable(log, str(e))
@@ -275,8 +301,44 @@ def _build_payload(log_row):
             logger.warning("SR context fetch failed for %s (%s); forwarding "
                            "without provenance", sr_guid, e)
 
+    # #1043 (contract s3.2): the review marker, the linkId and the
+    # repeating-group instance travel on the row's own JSON, written at
+    # ingest. Read here explicitly, because this function is the ONLY thing
+    # that turns a queued row into the CDR's context: a key it does not copy
+    # does not arrive (the #776 lesson, three fields fetched and dropped).
+    # getattr: this drains a queue and is also handed test doubles (see the
+    # author_org_guid note below).
+    raw = getattr(log_row, 'fhir_observation_json', None)
+    raw = raw if isinstance(raw, dict) else {}
+    review_required = raw.get('review_required') is True
+    if review_required:
+        if getattr(log_row, 'data_origin', None) != _origin.PATIENT_GENERATED:
+            raise ReviewContextIncomplete(
+                'review_required_without_patient_generated: the row is marked '
+                'for review but is not patient-generated', terminal=True)
+        # request.pdhc's live answer first; else what ingest captured.
+        sr_patient_org_guid = sr_patient_org_guid or raw.get('patient_org_guid') or None
+        if not sr_patient_org_guid:
+            raise ReviewContextIncomplete(
+                'review_patient_org_unavailable: an answer awaiting review is '
+                "not forwarded without the patient's organisation "
+                '(request.pdhc could not be asked); will retry')
+
     fhir_obs = build_fhir_observation(log_row, sr_contexts=sr_contexts,
                                       contract_scopes=contract_scopes)
+    review_context = {}
+    if review_required:
+        # JSON true, and only ever present when true: the CDR refuses
+        # anything else by name, and every other row's context is unchanged.
+        review_context['review_required'] = True
+    if raw.get('linkId'):
+        # The linkId with its section prefix. It is ALSO transaction_guid
+        # below (where the CDR reads it); named here so no reader has to
+        # know that a QuestionnaireResponse answer's transaction is its
+        # linkId.
+        review_context['link_id'] = raw['linkId']
+    if raw.get('group'):
+        review_context['group'] = str(raw['group'])
     return {
         'patient_guid': log_row.patient_guid,
         'source_type': 'fhir',
@@ -322,6 +384,7 @@ def _build_payload(log_row):
             # gateway's rows reached no org-bound reader. None when request.pdhc
             # names none, never a guess.
             'patient_org_guid': sr_patient_org_guid,
+            **review_context,
         },
     }
 

@@ -61,6 +61,63 @@ Accepted observations are inserted into `cdr_delivery_log` with `status='pending
 - Delivery goes through `CdrClient.deliver_one` → `POST {CDR_BASE_URL}/api/v1/ingest` with headers `X-Source-Service: gateway.pdhc`, `X-Service-Key: GATEWAY_PDHC_SERVICE_KEY`, `X-Request-Id`, and `X-Operator-Session-Id` (replayed from the row so the chain-of-custody survives the async gap).
 - The payload includes the FHIR R5 resource, provenance re-hydrated from the SR context (best-effort — a context-fetch failure does not block delivery), and the **canonical typed observation** (`build_canonical_observation`, #500). The canonical core is also carried inside the FHIR resource as extension `urn:pdhc:fhir:extension:canonical-observation`, so the openEHR projection (rosetta, #501) reads real typed values rather than the lossy FHIR `value[x]`.
 
+### QuestionnaireResponse reports and the EPS review marker (#1043)
+
+A report whose `report_payload` is a FHIR `QuestionnaireResponse` is stored as
+one parent row (the whole resource, `skipped`) plus one child row per answered
+item. Since #1043:
+
+- **Nested items are walked.** A group's fields are extracted with their own
+  `linkId`; items nested under an answer too. Each group *instance* gets a
+  `group` id (`<receipt guid>/<n>`): the same for all fields of one entry,
+  different between entries, unique to the report. Before #1043 only top-level
+  items were read and a group's fields were dropped.
+- **A child without an item `code` is stored `skipped` and not forwarded**
+  (unchanged), **except for a review report**, whose children are forwarded
+  keyed by their `linkId`.
+
+**Review.** A patient's answers to the EPS form must be approved by care
+before they reach the patient summary (`plans/patient_app_contract.md` s3.2).
+`app/services/review.py` decides whether a report asks for it: the
+QuestionnaireResponse answers `https://plan.pdhc.se/fhir/Questionnaire/eps-patient`
+(with or without `|version`), or carries the tag
+`https://pdhc.se/fhir/tag | eps-review`, or the report body has
+`"review_required": true`.
+
+| Situation | Answer |
+|---|---|
+| asks for review, PAT has scope `patient_generated` | 202, `"review_required": true` in the response |
+| asks for review, PAT **without** `patient_generated` | **403 `REVIEW_REQUIRES_PATIENT_GENERATED`**, nothing stored. Never accepted with the marker dropped |
+| `review_required` that is not a JSON boolean | 422 `INVALID_REVIEW_REQUIRED` |
+| `review_required: true` on something that is not a QuestionnaireResponse | 422 `REVIEW_REQUIRES_QUESTIONNAIRE_RESPONSE` |
+| an answered item without a `linkId`, or one longer than 36 characters | 422 `REVIEW_LINK_ID_UNUSABLE` (the linkId is the key, in String(36) columns here and in the CDR) |
+| request.pdhc names no `patient_org_guid` for the ServiceRequest | **503 `REVIEW_PATIENT_ORG_UNAVAILABLE`**, nothing stored, retry |
+
+How the marker travels, hop by hop:
+
+1. `report_ingestion.ingest` — `review.claim(body)`; refused unless the PAT forces `data_origin = patient_generated` (#1014).
+2. `_store_questionnaire_response` — each child row's `fhir_observation_json` gets `review_required: true`, `linkId`, `group`, `concept_name` (the item text, the reviewer's label) and `patient_org_guid` (captured now); `data_origin` is on the row; `status = 'pending'`. A coded answer is stored as its **code** (`has`, `none`, `severe`), not its display.
+3. `cdr_delivery_log` — the queue. Nothing else crosses it.
+4. `cdr_forwarder._build_payload` — copies into `clinical_context`: `review_required: true` (present only when true), `transaction_guid` = the linkId (where the CDR reads it), `link_id` (the same, named), `group`, `data_origin`, `patient_org_guid`.
+5. `CdrClient.deliver_one` — posts the dict unchanged to `POST /api/v1/ingest`.
+
+A review row is **never forwarded without `patient_org_guid`**: the CDR scopes
+the review queue on it, and a pending answer without it can be decided by
+nobody. The forwarder uses request.pdhc's live answer, else the value captured
+at ingest; with neither the delivery is held (`review_patient_org_unavailable`
+in `last_error`) and retried within the normal retry budget. A row marked for
+review that is not patient-generated is failed terminally, never sent.
+
+Ordinary rows are untouched: their `clinical_context` has exactly the keys it
+had (plus `link_id`/`group` for QuestionnaireResponse children).
+
+### Feed and download for the patient app (#1043)
+
+Both are proxies; request.pdhc owns the content
+(`request.pdhc/gateway/docs/architecture.md` 5.2.1). `GET /provider/feed`
+now forwards `?patient_guid=` and, when it is given, the per-call audit row
+`provider.feed.polled` names that patient (`data_subject_guid`).
+
 `CDR_FORWARDING_DELETE_AFTER_DELIVERY` is now dead config (there is no local observation row left to delete) and is ignored.
 
 ## The analyse-pull proxy (`GET /api/v1/observations`)

@@ -17,6 +17,28 @@ The gateway does not keep the measurements itself. Once it has validated an inco
 7. **Data is resolved** — The gateway connects the measurements back to the original care plan, giving clinical meaning to the raw values
 8. **Data is forwarded** — A background worker forwards each accepted measurement onward to the clinical data repository (cdr1), where it is stored permanently
 
+## The patient app, forms and review (#1043)
+
+The patient app is a provider like any other, with one difference in its
+access token: the scope `patient_generated`. Everything it submits is stored
+as the patient's own data, whatever the app sends.
+
+- **Tasks.** The app reads the patient's orders from the feed (it can ask for
+  one patient's orders only) and downloads each one: the questions, their
+  units, the allowed interval, the answer alternatives, the schedule and, for
+  a form, the questionnaire itself.
+- **Forms.** A filled-in form is split into one stored answer per question,
+  including questions inside a repeated section (one allergy = substance,
+  reaction, severity, kept together).
+- **The patient summary form (EPS).** Answers to this form are sent on marked
+  *awaiting review*. A professional at the patient's care unit approves,
+  amends or rejects each one in the dashboard; only approved answers can reach
+  the patient summary in eps.pdhc. If any other client claims review, the
+  report is refused (`REVIEW_REQUIRES_PATIENT_GENERATED`) rather than stored
+  as if care had written it. If the patient's care unit cannot be established
+  at that moment the report is refused with
+  `REVIEW_PATIENT_ORG_UNAVAILABLE`; nothing is stored and it can be sent again.
+
 ## Key concepts
 
 - **PAT (Provider Access Token)**: A secure token that identifies the provider. Issued by the request system.

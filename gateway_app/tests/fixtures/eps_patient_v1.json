@@ -1,0 +1,425 @@
+{
+  "resourceType": "Questionnaire",
+  "id": "eps-patient",
+  "url": "https://plan.pdhc.se/fhir/Questionnaire/eps-patient",
+  "version": "1",
+  "name": "EpsPatient",
+  "title": "Din patientöversikt – det du själv kan berätta",
+  "status": "draft",
+  "experimental": true,
+  "subjectType": [
+    "Patient"
+  ],
+  "date": "2026-11-22",
+  "publisher": "PDHC platform",
+  "language": "sv",
+  "description": "Patientens egna uppgifter till patientöversikten (EPS): allergier, läkemedel, tidigare sjukdomar, vaccinationer och kontaktpersoner. Svaren lagras som patientgenererade och når patientöversikten först när vården har godkänt dem (#1044). Diagnoser ingår inte: de kommer från vården. Varje avsnitt börjar med ett uttryckligt val, så att 'inga kända' är ett svar och inte ett tomt avsnitt. Fritext förblir fritext: formuläret kodar ingenting.",
+  "meta": {
+    "tag": [
+      {
+        "system": "https://pdhc.se/fhir/tag",
+        "code": "eps-review"
+      }
+    ]
+  },
+  "item": [
+    {
+      "linkId": "intro",
+      "type": "display",
+      "text": "Här kan du själv berätta om dina allergier, läkemedel, tidigare sjukdomar, vaccinationer och kontaktpersoner. Skriv med egna ord. Vården läser dina svar och godkänner dem innan de förs in i din patientöversikt. Diagnoser fyller du inte i här – de kommer från vården."
+    },
+    {
+      "linkId": "allergy.intro",
+      "type": "display",
+      "text": "Allergier och överkänslighet. Till exempel mot läkemedel, mat, pollen, pälsdjur eller latex."
+    },
+    {
+      "linkId": "allergy.status",
+      "type": "choice",
+      "required": true,
+      "text": "Har du någon allergi eller överkänslighet?",
+      "answerOption": [
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has",
+            "display": "Ja, jag har en eller flera allergier eller överkänsligheter"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "none",
+            "display": "Jag har inga kända allergier"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "unknown",
+            "display": "Jag vet inte"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "allergy.entry",
+      "type": "group",
+      "repeats": true,
+      "text": "En allergi eller överkänslighet",
+      "enableWhen": [
+        {
+          "question": "allergy.status",
+          "operator": "=",
+          "answerCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has"
+          }
+        }
+      ],
+      "item": [
+        {
+          "linkId": "allergy.substance",
+          "type": "string",
+          "required": true,
+          "text": "Vad är du allergisk eller överkänslig mot?"
+        },
+        {
+          "linkId": "allergy.reaction",
+          "type": "text",
+          "text": "Vad händer när du reagerar? Till exempel utslag, klåda eller svårt att andas."
+        },
+        {
+          "linkId": "allergy.severity",
+          "type": "choice",
+          "text": "Hur allvarlig brukar reaktionen vara?",
+          "answerOption": [
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "mild",
+                "display": "Lindrig – besvärande men går över av sig själv"
+              }
+            },
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "moderate",
+                "display": "Måttlig – jag behöver läkemedel eller vård"
+              }
+            },
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "severe",
+                "display": "Allvarlig – till exempel svårt att andas, svullnad i halsen eller svimning"
+              }
+            },
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "unknown",
+                "display": "Vet inte"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "linkId": "medication.intro",
+      "type": "display",
+      "text": "Läkemedel. Ta med allt du använder regelbundet eller vid behov: receptbelagda läkemedel, receptfria läkemedel och kosttillskott."
+    },
+    {
+      "linkId": "medication.status",
+      "type": "choice",
+      "required": true,
+      "text": "Använder du några läkemedel?",
+      "answerOption": [
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has",
+            "display": "Ja, jag använder ett eller flera läkemedel"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "none",
+            "display": "Jag använder inga läkemedel"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "unknown",
+            "display": "Jag vet inte"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "medication.entry",
+      "type": "group",
+      "repeats": true,
+      "text": "Ett läkemedel",
+      "enableWhen": [
+        {
+          "question": "medication.status",
+          "operator": "=",
+          "answerCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has"
+          }
+        }
+      ],
+      "item": [
+        {
+          "linkId": "medication.name",
+          "type": "string",
+          "required": true,
+          "text": "Vad heter läkemedlet? Skriv namnet som det står på förpackningen."
+        },
+        {
+          "linkId": "medication.dose",
+          "type": "string",
+          "text": "Hur mycket tar du varje gång? Till exempel 1 tablett eller 500 mg."
+        },
+        {
+          "linkId": "medication.frequency",
+          "type": "string",
+          "text": "Hur ofta tar du det? Till exempel 2 gånger om dagen eller vid behov."
+        },
+        {
+          "linkId": "medication.indication",
+          "type": "string",
+          "text": "Vad tar du det för?"
+        },
+        {
+          "linkId": "medication.prescribed",
+          "type": "choice",
+          "text": "Har en läkare eller sjuksköterska skrivit ut det?",
+          "answerOption": [
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "yes",
+                "display": "Ja"
+              }
+            },
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "no",
+                "display": "Nej"
+              }
+            },
+            {
+              "valueCoding": {
+                "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+                "code": "unknown",
+                "display": "Vet inte"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "linkId": "history.intro",
+      "type": "display",
+      "text": "Tidigare sjukdomar. Sjukdomar, operationer eller skador du har haft tidigare och som vården bör känna till."
+    },
+    {
+      "linkId": "history.status",
+      "type": "choice",
+      "required": true,
+      "text": "Har du haft någon sjukdom tidigare som vården bör känna till?",
+      "answerOption": [
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has",
+            "display": "Ja, jag har haft en eller flera sjukdomar"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "none",
+            "display": "Jag har inga tidigare sjukdomar att berätta om"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "unknown",
+            "display": "Jag vet inte"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "history.entry",
+      "type": "group",
+      "repeats": true,
+      "text": "En tidigare sjukdom",
+      "enableWhen": [
+        {
+          "question": "history.status",
+          "operator": "=",
+          "answerCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has"
+          }
+        }
+      ],
+      "item": [
+        {
+          "linkId": "history.condition",
+          "type": "string",
+          "required": true,
+          "text": "Vilken sjukdom, operation eller skada var det?"
+        },
+        {
+          "linkId": "history.year",
+          "type": "integer",
+          "text": "Vilket år var det? Ungefär går bra."
+        }
+      ]
+    },
+    {
+      "linkId": "vaccination.intro",
+      "type": "display",
+      "text": "Vaccinationer. Till exempel mot covid-19, influensa, stelkramp eller TBE."
+    },
+    {
+      "linkId": "vaccination.status",
+      "type": "choice",
+      "required": true,
+      "text": "Har du fått några vaccinationer som du vill berätta om?",
+      "answerOption": [
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has",
+            "display": "Ja, jag har fått en eller flera vaccinationer"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "none",
+            "display": "Jag har inga vaccinationer att berätta om"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "unknown",
+            "display": "Jag vet inte"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "vaccination.entry",
+      "type": "group",
+      "repeats": true,
+      "text": "En vaccination",
+      "enableWhen": [
+        {
+          "question": "vaccination.status",
+          "operator": "=",
+          "answerCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has"
+          }
+        }
+      ],
+      "item": [
+        {
+          "linkId": "vaccination.vaccine",
+          "type": "string",
+          "required": true,
+          "text": "Vilket vaccin fick du, eller mot vilken sjukdom?"
+        },
+        {
+          "linkId": "vaccination.date",
+          "type": "date",
+          "text": "När fick du det? Om du inte minns dagen kan du lämna fältet tomt."
+        }
+      ]
+    },
+    {
+      "linkId": "contact.intro",
+      "type": "display",
+      "text": "Kontaktpersoner. En närstående som vården får kontakta om det behövs. Fråga gärna personen först."
+    },
+    {
+      "linkId": "contact.status",
+      "type": "choice",
+      "required": true,
+      "text": "Vill du ange någon kontaktperson?",
+      "answerOption": [
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has",
+            "display": "Ja, jag vill ange en eller flera kontaktpersoner"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "none",
+            "display": "Jag har ingen kontaktperson att ange"
+          }
+        },
+        {
+          "valueCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "unknown",
+            "display": "Jag vet inte eller vill vänta"
+          }
+        }
+      ]
+    },
+    {
+      "linkId": "contact.entry",
+      "type": "group",
+      "repeats": true,
+      "text": "En kontaktperson",
+      "enableWhen": [
+        {
+          "question": "contact.status",
+          "operator": "=",
+          "answerCoding": {
+            "system": "https://plan.pdhc.se/fhir/CodeSystem/eps-patient-answer",
+            "code": "has"
+          }
+        }
+      ],
+      "item": [
+        {
+          "linkId": "contact.name",
+          "type": "string",
+          "required": true,
+          "text": "Vad heter personen?"
+        },
+        {
+          "linkId": "contact.relation",
+          "type": "string",
+          "text": "Vem är personen för dig? Till exempel make, dotter eller god vän."
+        },
+        {
+          "linkId": "contact.phone",
+          "type": "string",
+          "text": "Vilket telefonnummer når vi personen på?"
+        }
+      ]
+    }
+  ]
+}

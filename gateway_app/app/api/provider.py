@@ -98,9 +98,13 @@ def provider_feed():
                 entries = data.get('entry') or data.get('items') or []
                 if isinstance(entries, list):
                     n_items = len(entries)
+            # #1043: a poll narrowed to one patient is a read ABOUT that
+            # patient, so the row names them (still one row per call).
+            feed_patient = (request.args.get('patient_guid') or '').strip() or None
             audit = AuditLog(
                 event_type='provider.feed.polled',
                 actor_guid=g.provider_org_guid,
+                data_subject_guid=feed_patient,
                 resource_guid=None,
                 ip_address=request.remote_addr,
                 correlation_id=request.headers.get('X-Correlation-Id'),
@@ -109,6 +113,7 @@ def provider_feed():
                     'since': request.args.get('since'),
                     'limit': request.args.get('limit'),
                     'cursor': request.args.get('cursor'),
+                    'patient_guid': feed_patient,
                     'n_items': n_items,
                     'granularity': 'per-query',
                 },

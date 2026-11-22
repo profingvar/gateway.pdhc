@@ -310,3 +310,13 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_eps_settings_1025.py — unset is unknown, not []
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_observations_endpoint.py, test_audit_granularity.py — "no blocks" stated on purpose
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/docs/gateway_technical_guide.md, gateway_user_guide.md
+
+## 2026-11-22 — #1043 EPS review marker, nested forms, feed filter (NOT deployed)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/review.py (NEW)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/report_ingestion.py — review claim + refusals; nested walk; group; code-less review children forwardable
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/cdr_forwarder.py — review_required / link_id / group in clinical_context; never without patient_org_guid
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/feed_service.py — forwards ?patient_guid=
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/provider.py — feed audit names the filtered patient
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_eps_review_1043.py (NEW)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/fixtures/eps_patient_v1.json (NEW, copy of plans/PROMs/eps_patient_v1.json)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/docs/gateway_technical_guide.md, gateway_user_guide.md (#1046)
