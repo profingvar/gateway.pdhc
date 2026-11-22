@@ -114,9 +114,19 @@ had (plus `link_id`/`group` for QuestionnaireResponse children).
 ### Feed and download for the patient app (#1043)
 
 Both are proxies; request.pdhc owns the content
-(`request.pdhc/gateway/docs/architecture.md` 5.2.1). `GET /provider/feed`
-now forwards `?patient_guid=` and, when it is given, the per-call audit row
-`provider.feed.polled` names that patient (`data_subject_guid`).
+(`request.pdhc/gateway/docs/architecture.md` 5.2.1). The patient guid in the
+feed is for the patient app only — a PAT with scope `patient_generated`
+(operator decision 2026-11-22):
+
+| PAT | feed items | `?patient_guid=<guid>` |
+|---|---|---|
+| with `patient_generated` | carry `patient_guid` | forwarded to request.pdhc; the per-call audit row `provider.feed.polled` names the patient (`data_subject_guid`) |
+| any other (provider1, cgm) | exactly the pre-#1043 item, no `patient_guid` | **403 `PATIENT_FILTER_REQUIRES_PATIENT_GENERATED`**, audited `provider.feed.patient_filter_refused`; request.pdhc is not asked |
+
+request.pdhc enforces this where the items are built, so it never emits the
+guid for another PAT. Gateway is the second lock: it refuses the filter itself
+and strips `patient_guid` from the items for an unscoped PAT, so an older or
+wrong request.pdhc still cannot leak it.
 
 `CDR_FORWARDING_DELETE_AFTER_DELIVERY` is now dead config (there is no local observation row left to delete) and is ignored.
 

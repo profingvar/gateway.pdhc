@@ -1069,3 +1069,9 @@ Measured first (epic #1039): feed and download are pure proxies of request.pdhc,
 - Tests: `tests/test_eps_review_1043.py`, 30, through the real report route with auth ON and the REAL form (`tests/fixtures/eps_patient_v1.json`, byte copy, drift-guarded); only `requests.get/post` patched. 22 of 29 fail against the old ingestion/forwarder code; 27 mutations each fail their tests. Suite 448 -> 478 passed, 5 skipped.
 - Seam check (scratch, not committed): the 11 payloads gateway produces for the form were posted to cdr.pdhc's real ingest (local test app, 438d6e3): 11 x 202, all `review_status = pending`, `patient_generated`, patient org and `group` stored.
 - Known: a retried review delivery that exhausts the 5-attempt budget ends `failed` like any other row and needs a manual requeue. The label sent is the item `text` from the response; if the client sends none, the linkId is the label.
+
+
+## 2026-11-22 — #1043 feed patient guid only for the patient app (NOT deployed)
+
+- Operator decision: `patient_guid` on feed items and the `?patient_guid=` filter only for a PAT with scope `patient_generated`. request.pdhc enforces it at the source; gateway refuses the filter by name (403 `PATIENT_FILTER_REQUIRES_PATIENT_GENERATED`, audited, request.pdhc not asked) and strips the key for an unscoped PAT, also when request.pdhc sends it anyway.
+- Tests through the real feed route with real PAT validation: scoped sees and filters; unscoped gets the pre-#1043 item byte for byte (fixture) and the named refusal. 7 mutations each fail. Suite 478 -> 482 passed, 5 skipped.

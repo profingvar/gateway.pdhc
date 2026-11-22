@@ -507,32 +507,97 @@ def test_the_claim_rules_in_one_place():
 
 # ── the feed and download proxies (request.pdhc owns their content) ──────
 
-def test_the_feed_proxy_forwards_the_patient_filter(client, app, db):
-    """`?patient_guid=` narrows the feed in request.pdhc; gateway must pass
-    it on, or the patient app would be handed every patient's orders."""
-    seen = {}
+#: One feed item exactly as request.pdhc emitted it before #1043.
+LEGACY_FEED_ITEM = {
+    'service_request_guid': 'sr-1', 'match_guid': 'm-1', 'status': 'sent',
+    'sr_status': 'active', 'title': 'CGM', 'intent': 'order', 'priority': 'routine',
+    'contract_guid': 'c-1', 'created_at': '2026-11-20T08:00:00',
+    'updated_at': '2026-11-20T08:00:00', 'period_start': None, 'period_end': None,
+    'download_url': '/api/v1/provider/download/sr-1'}
 
-    def post(url, json=None, **kw):
+
+class Feed:
+    """request.pdhc behind the feed proxy. `leaky=True` is a request.pdhc that
+    wrongly puts the patient guid on every item, whoever asks."""
+
+    def __init__(self, leaky=False):
+        self.leaky = leaky
+        self.gets = []
+
+    def post(self, url, json=None, **kw):
         assert url.endswith('/provider/validate-token')
+        scopes = {PAT_PATIENT_APP: 'read,write,patient_generated',
+                  PAT_HEALTHCARE: 'read,write'}.get(json.get('token'))
+        if not scopes:
+            return World._resp(401, {'message': 'unknown token'})
         return World._resp(200, {'valid': True, 'provider_org_guid': APP_ORG,
-                                 'contract_guid': CONTRACT,
-                                 'scopes': 'read,write,patient_generated',
+                                 'contract_guid': CONTRACT, 'scopes': scopes,
                                  'delivery_mode': 'poll'})
 
-    def get(url, params=None, headers=None, **kw):
-        seen.update(url=url, params=params, token=headers.get('X-Provider-Token'))
-        return World._resp(200, {'items': [{'service_request_guid': 'sr-1',
-                                            'patient_guid': PATIENT}], 'total': 1})
-    with patch.object(requests, 'post', side_effect=post), \
-         patch.object(requests, 'get', side_effect=get):
-        assert client.get('/api/v1/provider/feed').status_code == 401
-        r = client.get(f'/api/v1/provider/feed?patient_guid={PATIENT}&limit=5',
-                       headers={'X-Provider-Token': PAT_PATIENT_APP})
-    assert r.status_code == 200
-    assert r.get_json()['items'][0]['patient_guid'] == PATIENT     # passed through
+    def get(self, url, params=None, headers=None, **kw):
+        self.gets.append({'url': url, 'params': params,
+                          'token': headers.get('X-Provider-Token')})
+        item = dict(LEGACY_FEED_ITEM)
+        if self.leaky or headers.get('X-Provider-Token') == PAT_PATIENT_APP:
+            item['patient_guid'] = PATIENT
+        return World._resp(200, {'items': [item], 'total': 1})
+
+
+def _feed(client, feed, pat, query=''):
+    with patch.object(requests, 'post', side_effect=feed.post), \
+         patch.object(requests, 'get', side_effect=feed.get):
+        return client.get(f'/api/v1/provider/feed{query}',
+                          headers={'X-Provider-Token': pat} if pat else {})
+
+
+def test_the_feed_needs_a_pat(client, app, db):
+    assert _feed(client, Feed(), None).status_code == 401
+    assert _feed(client, Feed(), 'not-a-token').status_code == 401
+
+
+def test_the_patient_app_sees_the_guid_and_can_filter(client, app, db):
+    """`?patient_guid=` narrows the feed in request.pdhc; gateway must pass
+    it on, or the patient app would be handed every patient's orders."""
+    feed = Feed()
+    r = _feed(client, feed, PAT_PATIENT_APP, f'?patient_guid={PATIENT}&limit=5')
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()['items'][0].get('patient_guid') == PATIENT
+    [seen] = feed.gets
     assert seen['url'].endswith('/provider/feed')
     assert seen['params'] == {'patient_guid': PATIENT, 'limit': '5'}
     assert seen['token'] == PAT_PATIENT_APP
     audit = AuditLog.query.filter_by(event_type='provider.feed.polled').one()
     assert audit.payload_snapshot.get('patient_guid') == PATIENT
     assert audit.data_subject_guid == PATIENT
+
+
+@pytest.mark.parametrize('leaky', [False, True], ids=['request-correct', 'request-leaks'])
+def test_an_ordinary_pat_gets_the_feed_exactly_as_before(client, app, db, leaky):
+    """provider1 / cgm: the pre-#1043 item, byte for byte — also when
+    request.pdhc (older, or wrong) sends the guid anyway."""
+    r = _feed(client, Feed(leaky=leaky), PAT_HEALTHCARE)
+    assert r.status_code == 200
+    assert PATIENT not in r.get_data(as_text=True), 'no patient guid in the body'
+    expected = {'items': [LEGACY_FEED_ITEM], 'total': 1}
+    assert r.get_json() == expected
+    with app.test_request_context():
+        from flask import jsonify
+        assert r.get_data() == jsonify(expected).get_data()
+    audit = AuditLog.query.filter_by(event_type='provider.feed.polled').one()
+    assert audit.data_subject_guid is None
+
+
+def test_an_ordinary_pat_is_refused_the_patient_filter_by_name(client, app, db):
+    """Refused before anything is asked of request.pdhc — never ignored,
+    which would answer with every patient's orders."""
+    feed = Feed(leaky=True)
+    r = _feed(client, feed, PAT_HEALTHCARE, f'?patient_guid={PATIENT}')
+    assert r.status_code == 403, r.get_json()
+    assert r.get_json().get('code') == 'PATIENT_FILTER_REQUIRES_PATIENT_GENERATED'
+    assert 'items' not in r.get_json()
+    assert feed.gets == [], 'request.pdhc was not asked'
+    assert AuditLog.query.filter_by(
+        event_type='provider.feed.patient_filter_refused').count() == 1
+    assert AuditLog.query.filter_by(event_type='provider.feed.polled').count() == 0
+    # the same PAT without the filter still gets its feed
+    assert _feed(client, feed, PAT_HEALTHCARE).status_code == 200

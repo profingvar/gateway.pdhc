@@ -320,3 +320,4 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_eps_review_1043.py (NEW)
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/fixtures/eps_patient_v1.json (NEW, copy of plans/PROMs/eps_patient_v1.json)
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/docs/gateway_technical_guide.md, gateway_user_guide.md (#1046)
+- 2026-11-22 #1043 feed scoping: /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/provider.py, tests/test_eps_review_1043.py, docs/gateway_technical_guide.md, docs/gateway_user_guide.md

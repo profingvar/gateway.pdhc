@@ -23,8 +23,10 @@ The patient app is a provider like any other, with one difference in its
 access token: the scope `patient_generated`. Everything it submits is stored
 as the patient's own data, whatever the app sends.
 
-- **Tasks.** The app reads the patient's orders from the feed (it can ask for
-  one patient's orders only) and downloads each one: the questions, their
+- **Tasks.** The app reads the patient's orders from the feed. Because of its
+  scope it sees which patient each order belongs to and can ask for one
+  patient's orders only; no other provider's token can do either (their feed
+  is unchanged, and asking for a patient is refused) and downloads each one: the questions, their
   units, the allowed interval, the answer alternatives, the schedule and, for
   a form, the questionnaire itself.
 - **Forms.** A filled-in form is split into one stored answer per question,

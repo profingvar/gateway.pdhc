@@ -14,6 +14,11 @@ from ..services.report_ingestion import ReportIngestionService
 from ..services.receipt_service import ReceiptService
 from ..services.feed_service import FeedService
 from ..errors import APIError
+from ..services import data_origin as _origin
+
+#: #1043: the feed's patient filter asked for by a PAT that is not the
+#: patient app's.
+PATIENT_FILTER_REFUSED = 'PATIENT_FILTER_REQUIRES_PATIENT_GENERATED'
 
 
 @api_bp.route('/provider/report/<service_request_guid>', methods=['POST'])
@@ -88,7 +93,38 @@ def provider_feed():
     and the result count is enough for kontroller to reconstruct
     which feeds the provider polled.
     """
+    # #1043, operator decision 2026-11-22: the patient guid in the feed — on
+    # the items and as a filter — is for the patient app only, i.e. a PAT with
+    # scope `patient_generated`. request.pdhc, which builds the items, is
+    # where that is enforced (it never emits the guid for another PAT). This
+    # is the second lock on the same door: the filter is refused here by name
+    # before anything is proxied, and the key is stripped from whatever comes
+    # back, so a request.pdhc that is older or wrong still cannot leak it.
+    patient_scoped = _origin.forced_by_credential(g.pat_result) is not None
+    if (request.args.get('patient_guid') or '').strip() and not patient_scoped:
+        try:
+            from ..models import AuditLog
+            from ..extensions import db
+            db.session.add(AuditLog(
+                event_type='provider.feed.patient_filter_refused',
+                actor_guid=g.provider_org_guid,
+                ip_address=request.remote_addr,
+                correlation_id=request.headers.get('X-Correlation-Id'),
+                payload_snapshot={'provider_org_guid': g.provider_org_guid,
+                                  'reason': 'pat_without_patient_generated'}))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        raise APIError(
+            'The patient_guid filter is available only to an access token '
+            'with the scope patient_generated.',
+            code=PATIENT_FILTER_REFUSED, status_code=403)
+
     data, status = FeedService.get_feed(g.raw_token)
+    if 200 <= status < 300 and not patient_scoped and isinstance(data, dict):
+        for item in (data.get('items') or []):
+            if isinstance(item, dict):
+                item.pop('patient_guid', None)
     if 200 <= status < 300:
         try:
             from ..models import AuditLog
