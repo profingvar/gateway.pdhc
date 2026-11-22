@@ -85,7 +85,7 @@ The proxy target is `ANALYSE_BASE_URL`, which now points at **analyse.pdhc** (`h
 | sso.pdhc | Bearer-token validation for analysis endpoints + operator login | `SSO_BASE_URL`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`, `SSO_CALLBACK_URL` |
 | cdr.pdhc (cdr1) | Forwarding target — permanent observation store | `CDR_BASE_URL`, `GATEWAY_PDHC_SERVICE_KEY` |
 | analyse.pdhc | Analyse-pull federation target | `ANALYSE_BASE_URL`, `GATEWAY_PDHC_SERVICE_KEY` |
-| eps.pdhc (formerly ips.pdhc) | Spärr / PatientBlock list for the observation filter (#206) | `EPS_BASE_URL`, `EPS_API_KEY` — read first (#1025); `IPS_BASE_URL`, `IPS_API_KEY` are the deprecated fallback. Both empty = not configured, no blocks fetched (no default) |
+| eps.pdhc (formerly ips.pdhc) | Spärr / PatientBlock list for the observation filter (#206) | `EPS_BASE_URL`, `EPS_API_KEY` — read first (#1025); `IPS_BASE_URL`, `IPS_API_KEY` are the deprecated fallback. Both empty = not configured (no default): no blocks are fetched, so nothing is filtered. The same holds when eps refuses or cannot be reached |
 | provider (per-PAT) | Receipt delivery — routed per-PAT via `push_endpoint_url` / `push_secret` from request.pdhc, not a fixed URL |
 
 ## Configuration (.env)
