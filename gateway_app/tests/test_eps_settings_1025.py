@@ -74,8 +74,12 @@ def test_constructor_still_takes_the_old_names_alone(env):
 def test_constructor_with_nothing_set_fetches_nothing(env):
     c = IpsClient()
     assert c.base_url == "" and c.api_key is None
+    # #1047: nothing is fetched, and that is reported as UNKNOWN — it used to
+    # come back as `[]`, i.e. as "this patient has no blocks".
     with patch.object(ips_mod.requests, "get", side_effect=AssertionError("called")):
-        assert c.fetch_active_blocks("p1") == []
+        with pytest.raises(ips_mod.BlockStateUnknown) as e:
+            c.fetch_active_blocks("p1")
+    assert e.value.reason == "not_configured"
 
 
 def test_default_client_uses_the_new_names(env, no_config):

@@ -1046,3 +1046,13 @@ shape as the ones #871 is about:
 - Health 200 and file hashes verified in the container; sibling smoke green before (pre-rename smoke) and after.
 - No behaviour change until `EPS_*` is set in .env: operator script `/tmp/epsdep/eps_env.sh <group>` (refuses until https://eps.pdhc.se answers as eps.pdhc).
 
+
+
+## 2026-11-22 — #1047 spärr filter fails closed (NOT deployed)
+
+- **Defect.** `ips_client.fetch_active_blocks` returned `[]` for an unset eps address, a network error and every HTTP >= 400, and read the list from `blocks`/`entry` while eps sends `items`. So a refusal AND every successful answer read as "no blocks", were cached 30 s, and `GET /api/v1/observations` passed every row. Measured in production the same day: eps answered 403 to gateway's key (fixed on the eps side since: the key now holds `blocks:read`).
+- **Fix.** Only 200-with-empty-list and 404 mean "no blocks". Everything else raises `BlockStateUnknown(reason)` and is never cached. The list is read from `items`, then `blocks`, then `entry`. An active block that arrives redacted / without its source is unknown, not "no block". The observation read withholds the rows of a patient whose state is unknown, says so in the Bundle (`meta.tag` + `warnings[]`, counts only), logs `sparr.block_state_unknown` and audits `observations.sparr_unknown`.
+- **Flag.** `SPARR_FAIL_CLOSED`, default ON; `false/0/no/off` = shadow (rows pass, logged). No .env change is needed to enforce.
+- **Tests.** `tests/test_sparr_fail_closed_1047.py`, 41 tests through the real route, only `requests.get` patched. Against the pre-change code 35 fail (the 6 that pass are the unchanged behaviours: auth, 200-empty, 404, `blocks`/`entry` parse, good answer cached). 13 mutations of the new code each fail the tests written for them. Suite: 407 passed / 5 skipped before, 448 passed / 5 skipped after.
+- **Seven older tests were passing BECAUSE of the defect** (`test_observations_endpoint`, `test_audit_granularity`): eps is unset under test and "unset" came back as an empty block list. They now state "no blocks" on purpose (autouse fixture in those two modules).
+- **Consequence when deployed.** With eps answering gateway's key (verified by the coordinator), behaviour changes only where it should: real blocks now apply, and an eps outage withholds rows for its duration instead of showing them unfiltered. `deploy/smoke_siblings.py`'s eps check now FAILS (raises) on a 401/403 instead of passing on an empty list.

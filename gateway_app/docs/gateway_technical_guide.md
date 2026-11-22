@@ -71,7 +71,7 @@ Accepted observations are inserted into `cdr_delivery_log` with `status='pending
 - org-membership check; admin cross-org read requires an `X-Admin-Justification` header (#220),
 - resolve `SR → contract → requesting_org` locally (gateway owns this mapping; contract.pdhc is its upstream) and compute the matching SR list,
 - proxy the pre-computed SR filter to the analyse layer, which federates over CDR1–6 and returns one merged FHIR R5 searchset Bundle,
-- apply the IPS spärr filter to drop blocked provider rows (#206 / PDL Ch 4 §4),
+- apply the spärr filter to drop blocked provider rows (#206 / PDL Ch 4 §4). It **fails closed** (#1047): when eps.pdhc cannot say whether a patient has blocks, that patient's rows are withheld — see "Spärr: unknown block state" below,
 - audit the read (`observations.read` / `observations.admin_read`).
 
 The proxy target is `ANALYSE_BASE_URL`, which now points at **analyse.pdhc** (`http://host.docker.internal:9110`). This replaced the earlier dashboard.pdhc target — the code default was repointed to analyse (#540) and the server `.env` follows. `AnalyseClient` authenticates with `X-Source-Service: gateway.pdhc` + `X-Service-Key: GATEWAY_PDHC_SERVICE_KEY` (the same key value gateway uses for cdr1) plus the outbound operator-session headers.
@@ -85,7 +85,7 @@ The proxy target is `ANALYSE_BASE_URL`, which now points at **analyse.pdhc** (`h
 | sso.pdhc | Bearer-token validation for analysis endpoints + operator login | `SSO_BASE_URL`, `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET`, `SSO_CALLBACK_URL` |
 | cdr.pdhc (cdr1) | Forwarding target — permanent observation store | `CDR_BASE_URL`, `GATEWAY_PDHC_SERVICE_KEY` |
 | analyse.pdhc | Analyse-pull federation target | `ANALYSE_BASE_URL`, `GATEWAY_PDHC_SERVICE_KEY` |
-| eps.pdhc (formerly ips.pdhc) | Spärr / PatientBlock list for the observation filter (#206) | `EPS_BASE_URL`, `EPS_API_KEY` — read first (#1025); `IPS_BASE_URL`, `IPS_API_KEY` are the deprecated fallback. Both empty = not configured (no default): no blocks are fetched, so nothing is filtered. The same holds when eps refuses or cannot be reached |
+| eps.pdhc (formerly ips.pdhc) | Spärr / PatientBlock list for the observation filter (#206) | `EPS_BASE_URL`, `EPS_API_KEY` — read first (#1025); `IPS_BASE_URL`, `IPS_API_KEY` are the deprecated fallback. Both empty = not configured (no default). **Not configured, refused or unreachable is an UNKNOWN block state, not "no blocks"** (#1047): the patient's rows are withheld while `SPARR_FAIL_CLOSED` is on (the default) |
 | provider (per-PAT) | Receipt delivery — routed per-PAT via `push_endpoint_url` / `push_secret` from request.pdhc, not a fixed URL |
 
 ## Configuration (.env)
@@ -122,6 +122,8 @@ CDR_TIMEOUT_SECONDS=30
 # Must match GATEWAY_PDHC_SERVICE_KEY in cdr.pdhc and analyse.pdhc .envs.
 GATEWAY_PDHC_SERVICE_KEY=<shared service key>
 
+# Spärr fail-closed (#1047). Default true; only false/0/no/off turns it off (shadow).
+SPARR_FAIL_CLOSED=true
 # EPS (formerly ips.pdhc) — spärr reads. EPS_* first; IPS_* deprecated fallback (#1025)
 EPS_BASE_URL=https://eps.pdhc.se
 EPS_API_KEY=<this service's own ips ApiKey>
@@ -274,3 +276,40 @@ via the reverse proxy.
 |------|---------|
 | 9050 | Flask application (Gunicorn) |
 | 9051 | PostgreSQL database |
+
+
+## Spärr: unknown block state (#1047)
+
+`GET /api/v1/observations` asks eps.pdhc for each patient's active blocks
+(`GET /api/v1/patients/<guid>/blocks?active=true`) and drops the rows of a
+blocked source. The client (`app/services/ips_client.py`) now separates two
+answers it used to merge:
+
+| eps answer | meaning | effect |
+|---|---|---|
+| 200 with an empty list; 404 (patient unknown to eps) | **no blocks** | rows pass; cached 30 s |
+| 200 with blocks | blocks | the blocked source's rows are dropped (lifts honoured); cached 30 s |
+| address unset, network error or timeout, 401/403/5xx or any other status, a body that is not JSON or carries no list, an active block that arrives `redacted` / without `source_scope_id` | **unknown** (`BlockStateUnknown`) | **never cached**; see below |
+
+The list is read from `items` (what eps sends: `{"items": [...], "total": N}`),
+then `blocks`, then `entry`. Before #1047 only `blocks`/`entry` were read, so
+every successful answer parsed as "no blocks"; and every failure returned `[]`
+and was cached for 30 s. Either way the filter passed everything.
+
+When the state is unknown for a patient:
+
+- `SPARR_FAIL_CLOSED=true` (default; anything except `false`/`0`/`no`/`off`):
+  that patient's entries are **withheld**. Other patients in the same bundle
+  are unaffected. The Bundle says so: `meta.tag` carries
+  `urn:pdhc:gateway:sparr | sparr_block_state_unknown`, and a top-level
+  `warnings[]` entry gives `patients_withheld`, `entries_withheld` and the
+  `reasons` (`not_configured`, `network`, `http_<status>`,
+  `unreadable_payload`, `redacted_block`). The response names no patient.
+- `SPARR_FAIL_CLOSED=false`: **shadow**. Rows pass as before; nothing is added
+  to the response.
+
+Both modes log one WARNING per patient,
+`sparr.block_state_unknown ENFORCED|SHADOW patient=<12 chars> reason=<code> entries=<n>`,
+and write one audit row `observations.sparr_unknown` naming the patients, the
+reasons and whether rows were withheld. A healthy system logs none of these;
+any occurrence means eps is not answering gateway's key.

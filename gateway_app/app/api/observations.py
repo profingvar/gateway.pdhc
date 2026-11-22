@@ -29,7 +29,7 @@ pre-cutover bundle: FHIR R5 searchset Bundle of Observation resources.
 from datetime import datetime, timezone
 import logging
 
-from flask import request, jsonify
+from flask import request, jsonify, current_app
 
 from . import api_bp
 from ..models import ServiceRequestStatus, AuditLog
@@ -228,8 +228,16 @@ def list_observations():
         for e in entries
         if _patient_guid_from_resource(e.get('resource'))
     })
+    sparr = None
     if entries and patient_guids:
-        blocks_by_patient = fetch_blocks_for_patients(set(patient_guids))
+        # #1047: `unknown` collects the patients eps could not answer for.
+        # They are absent from blocks_by_patient, where absent means "no
+        # blocks" — so they must be handled here, before the filter.
+        unknown = {}
+        blocks_by_patient = fetch_blocks_for_patients(
+            set(patient_guids), unknown=unknown)
+        if unknown:
+            entries, sparr = _apply_unknown_block_state(entries, unknown)
         entries = _drop_blocked_entries(entries, blocks_by_patient)
         patient_guids = sorted({
             _patient_guid_from_resource(e.get('resource'))
@@ -244,14 +252,72 @@ def list_observations():
         'total': len(entries),
         'entry': entries,
     }
+    if sparr and sparr['enforced']:
+        # Said in the response, not only in the log: a reader must be able to
+        # tell "this patient has no rows" from "rows were withheld". Counts
+        # and reasons only — the bundle never names the withheld patients.
+        filtered_bundle['meta'] = {'tag': [{
+            'system': SPARR_TAG_SYSTEM, 'code': SPARR_UNKNOWN_CODE,
+            'display': 'Rows withheld: block (spärr) state unknown'}]}
+        filtered_bundle['warnings'] = [{
+            'code': SPARR_UNKNOWN_CODE,
+            'message': ('The block (spärr) state could not be established '
+                        'with eps.pdhc for some patients; their rows are '
+                        'withheld. Retry shortly.'),
+            'patients_withheld': len(sparr['patients']),
+            'entries_withheld': sparr['entries_withheld'],
+            'reasons': sorted(set(sparr['patients'].values())),
+        }]
 
     _audit_observation_read(
         blob, org_guid, len(entries),
         is_admin_bypass=is_admin_bypass,
         justification=justification or None,
         patient_guids=patient_guids,
+        sparr=sparr,
     )
     return jsonify(filtered_bundle), 200
+
+
+#: Bundle.meta.tag / warnings[].code when rows were withheld (#1047).
+SPARR_TAG_SYSTEM = 'urn:pdhc:gateway:sparr'
+SPARR_UNKNOWN_CODE = 'sparr_block_state_unknown'
+
+
+def _apply_unknown_block_state(entries, unknown):
+    """What to do with the rows of patients whose block state is UNKNOWN
+    (#1047). Returns ``(entries, sparr)``.
+
+    SPARR_FAIL_CLOSED on (the default): those patients' entries are dropped —
+    not knowing whether a patient has blocked a source is not permission to
+    show it (PDL Ch 4 § 4). Off: SHADOW — the rows pass, exactly as they did
+    before #1047, and each patient is logged with what enforcing would have
+    withheld, so the flag can be turned on from evidence.
+
+    Either way it is logged at WARNING, per patient, with the reason.
+    """
+    enforce = bool(current_app.config.get('SPARR_FAIL_CLOSED', True))
+    per_patient = {}
+    kept = []
+    for entry in entries:
+        pg = _patient_guid_from_resource(entry.get('resource') or {})
+        if pg in unknown:
+            per_patient[pg] = per_patient.get(pg, 0) + 1
+            if enforce:
+                continue
+        kept.append(entry)
+    for pg, n in sorted(per_patient.items()):
+        logger.warning(
+            'sparr.block_state_unknown %s patient=%s reason=%s entries=%d — %s',
+            'ENFORCED' if enforce else 'SHADOW', str(pg)[:12], unknown[pg], n,
+            'rows withheld' if enforce
+            else 'rows PASSED unfiltered (SPARR_FAIL_CLOSED is off)')
+    return kept, {
+        'enforced': enforce,
+        'patients': {pg: unknown[pg] for pg in per_patient},
+        'entries_withheld': sum(per_patient.values()) if enforce else 0,
+        'entries_affected': sum(per_patient.values()),
+    }
 
 
 def _empty_bundle():
@@ -266,7 +332,7 @@ def _empty_bundle():
 
 def _audit_observation_read(blob, org_guid, count, *,
                             is_admin_bypass=False, justification=None,
-                            patient_guids=None):
+                            patient_guids=None, sparr=None):
     """Persist audit row(s) for the observations read.
 
     Audit granularity (ticket #221):
@@ -293,6 +359,24 @@ def _audit_observation_read(blob, org_guid, count, *,
     patient_guids = list(patient_guids or [])
     correlation = request.headers.get('X-Correlation-Id')
     try:
+        if sparr and sparr.get('patients'):
+            # #1047: one row for the fact that the block state was unknown,
+            # naming the patients (the audit log may; the response does not)
+            # and whether their rows were withheld or passed in shadow.
+            db.session.add(AuditLog(
+                event_type='observations.sparr_unknown',
+                actor_guid=blob.get('user_guid'),
+                resource_guid=org_guid,
+                ip_address=request.remote_addr,
+                correlation_id=correlation,
+                payload_snapshot={
+                    'org_guid': org_guid,
+                    'enforced': sparr['enforced'],
+                    'patients': sparr['patients'],
+                    'entries_withheld': sparr['entries_withheld'],
+                    'entries_affected': sparr['entries_affected'],
+                },
+            ))
         if is_admin_bypass:
             seeds = patient_guids or [None]
             for pg in seeds:

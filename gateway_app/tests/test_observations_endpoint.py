@@ -18,6 +18,20 @@ from app.models import ServiceRequestStatus, CdrDeliveryLog
 from app.extensions import db
 
 
+@pytest.fixture(autouse=True)
+def _eps_reports_no_blocks():
+    """These tests are not about spärr, so eps answers "no blocks" for every
+    patient. Until #1047 they got that answer by accident: eps is unset under
+    test, and the client turned "unset" into an empty block list. An unknown
+    block state now withholds the patient's rows (see test_sparr_fail_closed_
+    1047.py), so the answer is given here on purpose. A test that patches the
+    same target itself still wins.
+    """
+    with patch('app.api.observations.fetch_blocks_for_patients',
+               return_value={}):
+        yield
+
+
 ORG_A = str(uuid.uuid4())
 ORG_B = str(uuid.uuid4())
 PROV_ORG = str(uuid.uuid4())

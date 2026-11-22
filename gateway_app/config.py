@@ -122,6 +122,16 @@ class Config:
         os.environ.get('ANALYSE_TIMEOUT_SECONDS', '30'))
 
 
+    # #1047: when eps.pdhc cannot say whether a patient has blocks (spärr) —
+    # unset address, network error, 401/403/5xx, an unreadable or redacted
+    # answer — GET /api/v1/observations withholds that patient's rows.
+    # ON unless explicitly turned off; off is SHADOW (rows pass, and what
+    # enforcing would withhold is logged as `sparr.block_state_unknown SHADOW`).
+    SPARR_FAIL_CLOSED = os.environ.get(
+        'SPARR_FAIL_CLOSED', 'true').strip().lower() not in (
+            '0', 'false', 'no', 'off')
+
+
 class TestConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'

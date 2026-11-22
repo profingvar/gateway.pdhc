@@ -60,6 +60,39 @@ DEFAULT_TTL_SECONDS = 30
 DEFAULT_TIMEOUT = 4.0
 
 
+class BlockStateUnknown(Exception):
+    """eps could not tell us whether this patient has blocks (#1047).
+
+    NOT the same answer as "no blocks". Until #1047 the client returned ``[]``
+    for an unset address, a network error and every HTTP >= 400 alike, so a
+    refusal from eps read as "this patient has blocked nothing", was cached
+    for 30 s, and the observation filter passed every row. Measured in
+    production 2026-11-22: eps answered 403 to gateway's key for a real
+    patient, and — separately — every 200 parsed as empty because eps sends
+    ``items`` and this client read ``blocks``. The control was dead both ways.
+
+    Only two answers mean "no blocks": HTTP 200 carrying an empty list, and
+    HTTP 404 (eps does not know the patient, so it holds no block for them).
+    Everything else raises this, is never cached, and the caller decides
+    (the observation read fails closed, see app/api/observations.py).
+
+    ``reason`` is a short stable code for logs, audit and the response:
+    ``not_configured``, ``network``, ``http_<status>``, ``unreadable_payload``,
+    ``redacted_block``.
+    """
+
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(f"{reason}{': ' + detail if detail else ''}")
+        self.reason = reason
+        self.detail = detail
+
+
+#: The keys eps may carry the list under, in the order tried. eps answers
+#: ``{"items": [...], "total": N}``; ``blocks`` is a temporary duplicate it
+#: emits for older readers; ``entry`` is the legacy FHIR-ish spelling.
+BLOCK_LIST_KEYS = ("items", "blocks", "entry")
+
+
 @dataclass(frozen=True)
 class Block:
     guid: str
@@ -116,30 +149,58 @@ class IpsClient:
         return h
 
     def fetch_active_blocks(self, patient_guid: str) -> list[Block]:
-        if not self.base_url or not patient_guid:
+        """The patient's blocks as eps holds them.
+
+        Returns a list — empty ONLY when eps said so (200 with an empty list)
+        or does not know the patient (404). Raises ``BlockStateUnknown`` when
+        the answer could not be had or could not be applied (#1047); it never
+        turns "could not find out" into "no blocks".
+        """
+        if not patient_guid:
             return []
+        if not self.base_url:
+            raise BlockStateUnknown(
+                "not_configured", "EPS_BASE_URL / IPS_BASE_URL is not set")
         url = f"{self.base_url}/api/v1/patients/{patient_guid}/blocks"
         try:
             r = requests.get(
                 url, params={"active": "true"},
                 headers=self._headers(), timeout=self.timeout,
             )
-        except requests.RequestException:
-            current_app.logger.warning(
-                "ips block fetch failed (network) for %s",
-                patient_guid[:12],
-            )
-            return []
+        except requests.RequestException as e:
+            raise BlockStateUnknown("network", type(e).__name__) from e
         if r.status_code == 404:
             return []
-        if r.status_code >= 400:
-            current_app.logger.warning(
-                "ips block fetch %s -> %s", patient_guid[:12], r.status_code
-            )
-            return []
-        payload = r.json() or {}
-        raw = payload.get("blocks") or payload.get("entry") or []
-        return [Block.from_dict(b) for b in raw if isinstance(b, dict)]
+        if r.status_code != 200:
+            raise BlockStateUnknown(f"http_{r.status_code}")
+        try:
+            payload = r.json()
+        except ValueError as e:
+            raise BlockStateUnknown("unreadable_payload", "not JSON") from e
+        raw = None
+        if isinstance(payload, dict):
+            for key in BLOCK_LIST_KEYS:
+                if isinstance(payload.get(key), list):
+                    raw = payload[key]
+                    break
+        if raw is None:
+            raise BlockStateUnknown(
+                "unreadable_payload",
+                "none of " + "/".join(BLOCK_LIST_KEYS) + " is a list")
+        blocks = []
+        for b in raw:
+            if not isinstance(b, dict):
+                raise BlockStateUnknown("unreadable_payload", "a block is not an object")
+            # eps redacts a block's source for a caller not entitled to see
+            # it (`redacted: true`, `source_scope_id: null`). The filter
+            # matches on that source, so a redacted ACTIVE block is one we
+            # know exists and cannot apply: unknown, never "no block".
+            if b.get("is_active") and (b.get("redacted")
+                                       or not b.get("source_scope_id")):
+                raise BlockStateUnknown(
+                    "redacted_block", "an active block arrived without its source")
+            blocks.append(Block.from_dict(b))
+        return blocks
 
 
 class _BlockCache:
@@ -212,6 +273,9 @@ def get_active_blocks(
         if cached is not None:
             return cached
     client = client or _default_client()
+    # BlockStateUnknown propagates from here BEFORE the put below, so a
+    # failure is never cached (#1047): the next read asks eps again rather
+    # than replaying "unknown" — or, as before, a false "no blocks" — for 30 s.
     blocks = [b for b in client.fetch_active_blocks(patient_guid) if b.is_active]
     if use_cache:
         _cache.put(patient_guid, blocks)
@@ -319,10 +383,17 @@ def fetch_blocks_for_patients(
     patient_guids: Iterable[str],
     *,
     client: IpsClient | None = None,
+    unknown: dict | None = None,
 ) -> dict[str, list[Block]]:
     """Batch convenience — one IPS lookup per unique patient guid,
     returning ``{patient_guid: [Block...]}``. De-dupes and respects
     the cache. Used by /api/v1/observations after candidate selection.
+
+    #1047: a patient whose block state could not be established is NOT in
+    the returned dict (absent there has always meant "no blocks", which this
+    patient is not). Pass a dict as ``unknown`` and it is filled with
+    ``{patient_guid: reason}`` for those patients; without one the
+    ``BlockStateUnknown`` propagates, so no caller can lose it by accident.
     """
     out: dict[str, list[Block]] = {}
     seen: set[str] = set()
@@ -330,5 +401,10 @@ def fetch_blocks_for_patients(
         if not pid or pid in seen:
             continue
         seen.add(pid)
-        out[pid] = get_active_blocks(pid, client=client)
+        try:
+            out[pid] = get_active_blocks(pid, client=client)
+        except BlockStateUnknown as e:
+            if unknown is None:
+                raise
+            unknown[pid] = e.reason
     return out

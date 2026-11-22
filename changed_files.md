@@ -300,3 +300,13 @@ false for 11 files; a hand survey cannot be the gate here.
 - gateway_app/docs/gateway_technical_guide.md — dependency row + config block
 - deploy/smoke_siblings.py — resolves the EPS address with the client's own helper
 - gateway_app/tests/test_eps_settings_1025.py (NEW)
+
+## 2026-11-22 — #1047 spärr filter fails closed (NOT deployed)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/ips_client.py — BlockStateUnknown; items/blocks/entry; no failure cached; redacted block = unknown
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/observations.py — withhold rows of unknown-state patients; Bundle meta.tag + warnings; audit observations.sparr_unknown
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/config.py — SPARR_FAIL_CLOSED (default on)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/.env.example — SPARR_FAIL_CLOSED
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_sparr_fail_closed_1047.py (NEW)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_eps_settings_1025.py — unset is unknown, not []
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_observations_endpoint.py, test_audit_granularity.py — "no blocks" stated on purpose
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/docs/gateway_technical_guide.md, gateway_user_guide.md

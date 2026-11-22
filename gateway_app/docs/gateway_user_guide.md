@@ -35,7 +35,7 @@ The gateway no longer has a page for browsing stored observations, because it no
 - confirms the caller is allowed to see the requested organisation (an administrator can read across organisations only with a written justification, which is recorded),
 - works out which service requests belong to that organisation,
 - forwards the query to the analysis layer (analyse.pdhc), which gathers the matching observations from across the CDRs,
-- removes any rows the patient has blocked from that provider (spärr), and
+- removes any rows the patient has blocked from that provider (spärr). If the registry (eps.pdhc) cannot be asked whether the patient has blocks, that patient's rows are **withheld** rather than shown, and the answer carries a warning (`sparr_block_state_unknown`) saying how many patients were held back; try again shortly (#1047), and
 - records the read in the audit trail.
 
 This is an API used by other systems, not a web page a person browses.
