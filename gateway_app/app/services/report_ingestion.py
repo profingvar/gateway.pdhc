@@ -901,6 +901,12 @@ def _qr_child_json(link_id, text, concept_code, concept_display, answer,
     }
     if group:
         doc['group'] = group
+    coding = answer.get('valueCoding') if isinstance(answer, dict) else None
+    if (isinstance(coding, dict) and coding.get('display')
+            and str(coding.get('display')) != str(value)):
+        # #1044: only when it says something the value does not, so the
+        # pre-#1044 shape is unchanged for every display-valued answer.
+        doc['value_display'] = coding['display']
     if review_required:
         doc['review_required'] = True
         # The label a reviewer reads: the CDR takes it from
@@ -935,6 +941,11 @@ def _extract_qr_answer(answer, prefer_code=False):
         # value (`2026-03-14` is a valid dateTime), so nothing is invented by
         # widening it, and the builder has no `date` branch to land in.
         return answer['valueDate'], 'dateTime'
+    if 'valueTime' in answer:
+        # #1043: the builder has no time type; a time of day is kept as text.
+        return answer['valueTime'], 'text'
+    if 'valueUri' in answer:
+        return answer['valueUri'], 'text'
     if 'valueDateTime' in answer:
         # #871: was `datetime` — a CASE difference from the only spelling the
         # builder and validator know. It fell through both.

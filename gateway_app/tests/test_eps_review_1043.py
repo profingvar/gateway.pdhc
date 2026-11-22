@@ -255,6 +255,37 @@ def test_values_arrive_typed_and_choices_as_their_code(client, app, world):
     assert sev['fhir_resource']['valueCodeableConcept']['coding'][0]['code'] == 'severe'
 
 
+def test_a_coded_review_answer_keeps_the_display_the_patient_picked(client, app, world):
+    """#1044: the CODE is the value (eps reads it), and the words the patient
+    chose ride along, so the patient's status page can show them."""
+    _report(client, eps_response())
+    _forward(app, world)
+    sev = next(p for p in world.ingested if p['observation']['value'] == 'severe')
+    cc = sev['fhir_resource']['valueCodeableConcept']
+    shown = cc['coding'][0]['display']
+    assert cc['coding'][0]['code'] == 'severe'
+    assert shown and shown != 'severe' and cc['text'] == shown
+    # a free-text answer is untouched by this
+    pen = next(p for p in world.ingested if p['observation']['value'] == 'Penicillin')
+    assert 'valueCodeableConcept' not in pen['fhir_resource']
+
+
+def test_time_and_url_answers_reach_the_cdr_as_text(client, app, world):
+    """#1043: the PWA sends valueTime / valueUri; they used to become no row."""
+    qr = {'resourceType': 'QuestionnaireResponse', 'status': 'completed',
+          'questionnaire': 'https://forms.pdhc.se/Questionnaire/demo',
+          'item': [{'linkId': 't', 'code': [{'code': 't.code', 'display': 'T'}],
+                    'answer': [{'valueTime': '07:30:00'}]},
+                   {'linkId': 'u', 'code': [{'code': 'u.code', 'display': 'U'}],
+                    'answer': [{'valueUri': 'https://example.org/x'}]}]}
+    r, _ = _report(client, qr)
+    assert r.status_code == 202 and r.get_json()['items_extracted'] == 2
+    _forward(app, world)
+    got = {p['clinical_context']['link_id']: p['fhir_resource'].get('valueString')
+           for p in world.ingested}
+    assert got == {'t': '07:30:00', 'u': 'https://example.org/x'}
+
+
 # ── 2. nested items and the repeating-group instance ─────────────────────
 
 def test_the_fields_of_one_entry_share_a_group_and_entries_differ(client, app, world):

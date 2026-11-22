@@ -79,7 +79,7 @@ def build_canonical_observation(row):
     }
 
 
-def _add_typed_value(obs, value, rtype, unit_display, unit_code):
+def _add_typed_value(obs, value, rtype, unit_display, unit_code, value_display=None):
     """Emit the correct value[x] for the DECLARED response_type (#489.1/2).
 
     numeric→valueQuantity, categorical→valueCodeableConcept, boolean→valueBoolean,
@@ -98,9 +98,13 @@ def _add_typed_value(obs, value, rtype, unit_display, unit_code):
         obs['valueBoolean'] = _to_bool(value)
     elif rtype == 'categorical':
         s = str(value)
+        # #1044: a review answer stores the CODE as its value (eps reads it);
+        # the display the patient picked rides alongside, so a reader can show
+        # words instead of `has` / `none`. Absent, the display is the value.
+        d = str(value_display) if value_display else s
         obs['valueCodeableConcept'] = {
-            'coding': [{'system': VALUE_SYSTEM, 'code': s, 'display': s}],
-            'text': s,
+            'coding': [{'system': VALUE_SYSTEM, 'code': s, 'display': d}],
+            'text': d,
         }
     elif rtype == 'dateTime':
         obs['valueDateTime'] = str(value)
@@ -178,7 +182,8 @@ def build_fhir_observation(row, sr_contexts=None, contract_scopes=None):
     # --- Value: typed on the declared response_type (#489.1/2/3) ---
     # Unit reference routes through plan.pdhc's unit catalog (platform
     # principle: only plan.pdhc emits external code-system refs).
-    _add_typed_value(obs, value, rtype, unit_display, unit_code)
+    _add_typed_value(obs, value, rtype, unit_display, unit_code,
+                     value_display=raw.get('value_display'))
 
     # --- basedOn: ServiceRequest + PlanDefinition ---
     based_on = []
