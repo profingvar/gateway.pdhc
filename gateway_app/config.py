@@ -131,6 +131,12 @@ class Config:
         'SPARR_FAIL_CLOSED', 'true').strip().lower() not in (
             '0', 'false', 'no', 'off')
 
+    # #1049 (contract s7.3): the patient app's door, POST /api/v1/patient-card
+    # and NOTHING else. Gateway's OWN value (patientapp.pdhc holds the same
+    # value as GATEWAY_PATIENTAPP_KEY). Empty or unset admits nobody.
+    PATIENTAPP_PDHC_SERVICE_KEY = os.environ.get(
+        'PATIENTAPP_PDHC_SERVICE_KEY', '').strip()
+
 
 class TestConfig(Config):
     TESTING = True
@@ -150,3 +156,5 @@ class TestConfig(Config):
     # the cookie would never be stored and every session-dependent test would
     # fail for a reason unrelated to what it tests.
     SESSION_COOKIE_SECURE = False
+    # #1049: never inherited from a developer's .env; tests set it per test.
+    PATIENTAPP_PDHC_SERVICE_KEY = ''

@@ -128,6 +128,71 @@ guid for another PAT. Gateway is the second lock: it refuses the filter itself
 and strips `patient_guid` from the items for an unscoped PAT, so an older or
 wrong request.pdhc still cannot leak it.
 
+### Patient card: `POST /api/v1/patient-card` (#1049)
+
+Contract `plans/patient_app_contract.md` s7.3. The patient app sends ONE
+section of the patient's card ("Mitt patientkort") with no care order: no
+ServiceRequest, no grant, no contract, no PAT. Code:
+`app/api/patient_card.py` (route), `app/services/patient_card.py` (checks and
+storage), `require_patientapp_key` in `app/api/auth.py`,
+`patient_listed_at_unit` in `app/services/ips_client.py`.
+
+**Door.** `X-Source-Service: patientapp.pdhc` + `X-Service-Key` equal
+(`hmac.compare_digest`) to gateway's own `PATIENTAPP_PDHC_SERVICE_KEY`. Empty
+or unset admits nobody. This is the only service-key door into gateway and it
+opens this route only; every other route still needs its own credential (PAT
+or SSO bearer), and a PAT or bearer does not open this one. `AUTH_DISABLED`
+does not relax it. Every refusal is the same 401 `invalid_service_credentials`;
+the real reason (`not_configured`, `wrong_source`, `missing_key`, `wrong_key`)
+is in the audit row `patient_card.auth_rejected`.
+
+**Body.** `{"patient_guid", "care_unit_guid", "section":
+"allergy|medication|history|vaccination|contact", "card_version": "<uuid>",
+"questionnaire_response": {"item": [...]}}`. Gateway sets `resourceType`,
+`questionnaire` (EPS canonical `|1`), `subject` (from `patient_guid`) and the
+`eps-review` tag; what the device sent for those is discarded.
+
+| Situation | Answer |
+|---|---|
+| stored | **202 `{"receipt_token", "rows": N}`**, audited `patient_card.received` |
+| same `card_version`, same content again | 202, the SAME receipt and N, nothing new stored (`patient_card.duplicate`) |
+| same `card_version`, different content | 409 `card_version_reused` |
+| a field missing or not a uuid, unknown section, not a response to the EPS form | 422 `validation`, `details[]` names each field |
+| an item (at any depth) whose linkId does not start with `<section>.` | 422 `validation`, `{"linkId", "code": "outside_section"}` |
+| an answer type gateway cannot store, or no answer at all | 422 `validation` (refused, not dropped: a version replaces the previous one, so a lost answer would read as removed) |
+| eps does not list the patient ACTIVELY at `care_unit_guid` | 403 `patient_not_at_unit` |
+| eps unset, unreachable, refusing gateway's key, or answering garbage | **503 `eps_unavailable`, nothing stored** (fail closed) |
+
+**The eps check.** `GET {EPS_BASE_URL}/api/v1/patients/<guid>/clinics` with
+gateway's own eps key (`EPS_API_KEY`, `Authorization: ApiKey`; the route needs
+no scope), asked on every submission, never cached. Matched on the clinic's
+`care_unit_guid` / `organisation_guid` (the SSO unit), never on the eps clinic
+`guid`; a clinic with `is_active: false` does not count; 404 (patient unknown)
+and an `X-PDHC-Patient-Guid` naming a different patient (the route also
+resolves a FHIR resource_id) are both "not at the unit".
+
+**Rows.** One parent (`skipped`, the whole response) and one `pending` child
+per answer, built with the same functions as the s3.2 EPS path:
+`review_required: true`, `data_origin = patient_generated`, linkId as
+`transaction_guid`/`concept_guid`, `group` (`<receipt guid>/<n>`), coded
+answers as their code with the display beside it, `patient_org_guid =
+care_unit_guid`. Added for s7.3: `card_section`, `card_version`,
+`source_service = patientapp.pdhc` and `performer: patient`.
+`service_request_guid`, `contract_guid` and `provider_org_guid` are NULL.
+
+**Forwarding.** The existing forwarder. A card row is recognised by its
+marker (`performer: patient` + `card_version`, and no ServiceRequest), never by
+its NULLs, so a broken order-path row is still failed as before. Its required
+fields are `concept_guid`, `card_section`, `card_version`, `patient_org_guid`
+instead of SR/contract/provider. No request.pdhc or contract.pdhc call is made
+for it. `clinical_context` carries `card_section`, `card_version` and
+`source_service: patientapp.pdhc` beside the s3.2 review keys; the FHIR
+Observation has no `basedOn` and `performer = [{"reference": "Patient/<guid>",
+"type": "Patient"}]` with NO identifier, because the CDR reads
+`performer[0].identifier.value` into its organisation column (`org_guid`). The
+HTTP call to the CDR is still gateway.pdhc with its own key. No receipt push
+and no completion tracking: there is no PAT and no order.
+
 `CDR_FORWARDING_DELETE_AFTER_DELIVERY` is now dead config (there is no local observation row left to delete) and is ignored.
 
 ## The analyse-pull proxy (`GET /api/v1/observations`)

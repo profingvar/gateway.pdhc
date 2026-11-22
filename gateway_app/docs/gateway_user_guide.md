@@ -41,6 +41,26 @@ as the patient's own data, whatever the app sends.
   at that moment the report is refused with
   `REVIEW_PATIENT_ORG_UNAVAILABLE`; nothing is stored and it can be sent again.
 
+## Mitt patientkort: the patient's own card (#1049)
+
+A patient who registered in the app can fill in their card (allergies,
+medicines, earlier illnesses, vaccinations, contacts) without any order from
+care. The app sends one section at a time to the gateway, which:
+
+- accepts it only from the patient app itself, proven by a key only the two
+  services hold (no other system can use this door, and the key opens nothing
+  else in the gateway);
+- checks with eps.pdhc that the patient is listed at the care unit named. If
+  not, the card is refused (`patient_not_at_unit`); if eps cannot be asked at
+  that moment, nothing is stored and the app can send again (`eps_unavailable`);
+- refuses a section that contains answers from another section;
+- stores each answer as the patient's own data, awaiting review by a
+  professional at that care unit, and forwards it to the clinical data
+  repository marked with the section and the card version. The newest version
+  of a section is the one care reviews;
+- answers with a receipt and the number of answers stored. Sending the same
+  version twice gives the same receipt.
+
 ## Key concepts
 
 - **PAT (Provider Access Token)**: A secure token that identifies the provider. Issued by the request system.

@@ -203,6 +203,80 @@ class IpsClient:
         return blocks
 
 
+class EpsUnavailable(Exception):
+    """eps could not say where a patient is listed (#1049).
+
+    Never read as "not listed": the patient-card route fails CLOSED on it
+    (503, nothing stored), because a guess either way is wrong — "listed"
+    would store a card for a unit nobody verified, "not listed" would tell
+    the patient a falsehood. ``reason`` is a short stable code, as for
+    ``BlockStateUnknown``: ``not_configured``, ``network``, ``http_<status>``,
+    ``unreadable_payload``.
+    """
+
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(f"{reason}{': ' + detail if detail else ''}")
+        self.reason = reason
+        self.detail = detail
+
+
+def _same_guid(a, b) -> bool:
+    return bool(a) and bool(b) and str(a).strip().lower() == str(b).strip().lower()
+
+
+def patient_listed_at_unit(patient_guid: str, care_unit_guid: str, *,
+                           client: "IpsClient | None" = None) -> bool:
+    """Is ``care_unit_guid`` among the patient's ACTIVE units in eps? (#1049)
+
+    ``GET {EPS}/api/v1/patients/<guid>/clinics`` with gateway's own eps key
+    (the route needs no scope). Matched on the clinic's ``care_unit_guid`` /
+    ``organisation_guid`` — the SSO unit — never on the eps clinic ``guid``,
+    the same rule sso's ``verify_patient`` uses. A clinic that says
+    ``is_active: false`` does not count, whatever the route filtered.
+
+    False when eps does not know the patient (404), when the patient is not
+    listed there, or when eps resolved the value as some OTHER identifier
+    (``X-PDHC-Patient-Guid`` names a different platform guid: the route also
+    accepts a FHIR resource_id, and a CDR row must carry the platform guid).
+    Raises ``EpsUnavailable`` for every answer that is not one of those —
+    never uncached guesswork, nothing is cached here at all.
+    """
+    client = client or _default_client()
+    if not client.base_url:
+        raise EpsUnavailable("not_configured", "EPS_BASE_URL / IPS_BASE_URL is not set")
+    url = f"{client.base_url}/api/v1/patients/{patient_guid}/clinics"
+    headers = client._headers()
+    headers.pop("X-Service-Key", None)   # eps ignores it; do not spread it
+    try:
+        r = requests.get(url, headers=headers, timeout=client.timeout)
+    except requests.RequestException as e:
+        raise EpsUnavailable("network", type(e).__name__) from e
+    if r.status_code == 404:
+        return False
+    if r.status_code != 200:
+        raise EpsUnavailable(f"http_{r.status_code}")
+    try:
+        payload = r.json()
+    except ValueError as e:
+        raise EpsUnavailable("unreadable_payload", "not JSON") from e
+    if isinstance(payload, dict):        # tolerate an enveloped answer
+        payload = payload.get("items")
+    if not isinstance(payload, list):
+        raise EpsUnavailable("unreadable_payload", "the clinic list is not a list")
+    resolved = (getattr(r, "headers", None) or {}).get("X-PDHC-Patient-Guid")
+    if isinstance(resolved, str) and resolved and not _same_guid(resolved, patient_guid):
+        return False
+    for c in payload:
+        if not isinstance(c, dict):
+            raise EpsUnavailable("unreadable_payload", "a clinic is not an object")
+        if c.get("is_active") is False:
+            continue
+        unit = c.get("care_unit_guid") or c.get("organisation_guid")
+        if _same_guid(unit, care_unit_guid):
+            return True
+    return False
+
+
 class _BlockCache:
     def __init__(self, ttl: float = DEFAULT_TTL_SECONDS):
         self.ttl = ttl

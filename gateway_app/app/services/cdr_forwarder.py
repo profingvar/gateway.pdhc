@@ -182,14 +182,29 @@ def _deliver_one(log):
     # child — so reaching this point with any of these NULL means an
     # incomplete production payload slipped through. Mark terminal
     # rather than ship dirty data downstream.
-    required_missing = [
-        name for name, value in (
+    #
+    # #1049 (contract s7.3): a patient-card row has, BY DESIGN, no
+    # ServiceRequest, no contract and no provider organisation (no PAT). Its
+    # required set is what stands in for them, all written at ingest: the
+    # linkId as concept, the section, the version, and the care unit eps
+    # confirmed. Recognised by the row's own marker, never by the NULLs —
+    # a broken order-path row must still fail here as before.
+    if is_patient_card_row(log):
+        raw_card = log.fhir_observation_json
+        checks = (
+            ('concept_guid',     log.concept_guid),
+            ('card_section',     raw_card.get('card_section')),
+            ('card_version',     raw_card.get('card_version')),
+            ('patient_org_guid', raw_card.get('patient_org_guid')),
+        )
+    else:
+        checks = (
             ('service_request_guid', log.service_request_guid),
             ('concept_guid',         log.concept_guid),
             ('contract_guid',        log.contract_guid),
             ('provider_org_guid',    log.provider_org_guid),
-        ) if not value
-    ]
+        )
+    required_missing = [name for name, value in checks if not value]
     if required_missing:
         _mark_failed_terminal(
             log,
@@ -258,6 +273,17 @@ def _deliver_one(log):
     # config is now dead code; left in place + ignored. Will be removed
     # together with the InboundObservation model in #299.
     return True
+
+
+def is_patient_card_row(log_row) -> bool:
+    """#1049: a row written by POST /api/v1/patient-card. The marker is the
+    one ``app/services/patient_card.py`` writes; a row is a card row only
+    when it also has no ServiceRequest, so an order-path row can never be
+    re-classified by what its JSON happens to contain."""
+    raw = getattr(log_row, 'fhir_observation_json', None)
+    return (isinstance(raw, dict) and raw.get('performer') == 'patient'
+            and bool(raw.get('card_version'))
+            and not getattr(log_row, 'service_request_guid', None))
 
 
 def _build_payload(log_row):
@@ -339,6 +365,15 @@ def _build_payload(log_row):
         review_context['link_id'] = raw['linkId']
     if raw.get('group'):
         review_context['group'] = str(raw['group'])
+    if is_patient_card_row(log_row):
+        # #1049 (contract s7.3/s7.4): which card section and which version of
+        # it this answer belongs to — the CDR supersedes older pending
+        # versions on it — and who submitted it. `source_service` here is
+        # what the CDR records on clinical_context; the HTTP caller is still
+        # gateway.pdhc with its own key.
+        review_context['card_section'] = raw['card_section']
+        review_context['card_version'] = raw['card_version']
+        review_context['source_service'] = raw.get('source_service') or 'patientapp.pdhc'
     return {
         'patient_guid': log_row.patient_guid,
         'source_type': 'fhir',

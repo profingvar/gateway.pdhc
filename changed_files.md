@@ -321,3 +321,18 @@ false for 11 files; a hand survey cannot be the gate here.
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/fixtures/eps_patient_v1.json (NEW, copy of plans/PROMs/eps_patient_v1.json)
 - /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/docs/gateway_technical_guide.md, gateway_user_guide.md (#1046)
 - 2026-11-22 #1043 feed scoping: /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/provider.py, tests/test_eps_review_1043.py, docs/gateway_technical_guide.md, docs/gateway_user_guide.md
+
+## 2026-11-22 — #1049 patient card (NOT deployed)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/patient_card.py (NEW) — POST /api/v1/patient-card
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/patient_card.py (NEW) — validation, eps check, rows, audit
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/__init__.py — registers the route
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/api/auth.py — require_patientapp_key
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/ips_client.py — EpsUnavailable, patient_listed_at_unit
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/cdr_forwarder.py — card rows: required fields, card_section/card_version/source_service in clinical_context
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/app/services/fhir_observation_builder.py — performer = the patient for card rows
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/config.py — PATIENTAPP_PDHC_SERVICE_KEY
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/.env.example — PATIENTAPP_PDHC_SERVICE_KEY
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/tests/test_patient_card_1049.py (NEW)
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/gateway_app/docs/gateway_technical_guide.md, docs/gateway_user_guide.md, docs/api_documentation.md
+- /Users/martiningvar/T7_sidewinder/gateway.pdhc/progress.md, changed_files.md
+- /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — Deviations [v2 gateway]

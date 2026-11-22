@@ -4,8 +4,9 @@ PATs are issued by request.pdhc. The gateway validates them and
 derives the provider identity from the token — never from request params.
 """
 import functools
+import hmac
 import logging
-from flask import request, g, jsonify
+from flask import current_app, request, g, jsonify
 from ..services.pat_validation import PATValidationService
 from ..models import AuditLog
 from ..extensions import db
@@ -100,6 +101,74 @@ def _audit_rejected(reason):
             },
         )
         db.session.add(entry)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+#: #1049 (contract s7.3): the only machine caller this gateway admits by
+#: service key, and the only route it is admitted to.
+PATIENTAPP_SOURCE = 'patientapp.pdhc'
+PATIENTAPP_KEY_CONFIG = 'PATIENTAPP_PDHC_SERVICE_KEY'
+
+
+def require_patientapp_key(f):
+    """Decorator for POST /api/v1/patient-card, and nothing else (#1049).
+
+    Admits exactly ``X-Source-Service: patientapp.pdhc`` with an
+    ``X-Service-Key`` equal (constant-time) to gateway's OWN config
+    ``PATIENTAPP_PDHC_SERVICE_KEY``. An empty or unset config admits nobody.
+
+    No other credential is consulted: a PAT (X-Provider-Token), an SSO bearer
+    or a cookie session neither opens this route nor is needed beside the key.
+    ``AUTH_DISABLED`` does not relax it either — that flag is for the admin
+    UI's dev login, and this is a machine door.
+
+    Every refusal looks the same to the caller (401
+    ``invalid_service_credentials``) and is audited with its real reason.
+    """
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        expected = (current_app.config.get(PATIENTAPP_KEY_CONFIG) or '').strip()
+        source = (request.headers.get('X-Source-Service') or '').strip()
+        given = request.headers.get('X-Service-Key') or ''
+        reason = None
+        if not expected:
+            reason = 'not_configured'
+        elif source != PATIENTAPP_SOURCE:
+            reason = 'wrong_source'
+        elif not given:
+            reason = 'missing_key'
+        elif not hmac.compare_digest(given.encode('utf-8'),
+                                     expected.encode('utf-8')):
+            reason = 'wrong_key'
+        if reason:
+            _audit_patientapp_rejected(reason, source)
+            return jsonify({
+                'error': 'invalid_service_credentials',
+                'code': 'invalid_service_credentials',
+                'message': 'X-Source-Service: patientapp.pdhc with a valid '
+                           'X-Service-Key is required',
+            }), 401
+        g.service_source = PATIENTAPP_SOURCE
+        return f(*args, **kwargs)
+    return wrapped
+
+
+def _audit_patientapp_rejected(reason, source):
+    try:
+        db.session.add(AuditLog(
+            event_type='patient_card.auth_rejected',
+            ip_address=request.remote_addr,
+            correlation_id=request.headers.get('X-Correlation-Id'),
+            payload_snapshot={
+                'endpoint': request.path,
+                'method': request.method,
+                'reason': reason,
+                # the claimed name only, never the key
+                'source_service': source[:64] or None,
+            },
+        ))
         db.session.commit()
     except Exception:
         db.session.rollback()

@@ -211,6 +211,18 @@ def build_fhir_observation(row, sr_contexts=None, contract_scopes=None):
             'display': 'Provider',
             'identifier': {'value': row.provider_org_guid},
         }]
+    elif raw.get('performer') == 'patient' and row.patient_guid:
+        # #1049 (contract s7.3): a patient-card answer is performed by the
+        # PATIENT, and there is no provider organisation. Deliberately NO
+        # `identifier`: the CDR reads performer[0].identifier.value into its
+        # ORGANISATION column (org_guid), and a patient guid there would be a
+        # person filed as an organisation. Without it org_guid is NULL, and
+        # the card is scoped on patient_org_guid (the care unit) instead.
+        obs['performer'] = [{
+            'reference': f'Patient/{row.patient_guid}',
+            'type': 'Patient',
+            'display': 'Patient',
+        }]
 
     # --- referenceRange from raw or sr_context goals ---
     range_min = raw.get('range_min')

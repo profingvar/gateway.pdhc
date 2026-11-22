@@ -176,6 +176,19 @@ No auth required (will be added).
 
 ---
 
+### Submit a patient card section (#1049)
+
+```
+POST /api/v1/patient-card
+X-Source-Service: patientapp.pdhc
+X-Service-Key: <PATIENTAPP_PDHC_SERVICE_KEY>
+```
+Body `{"patient_guid", "care_unit_guid", "section", "card_version",
+"questionnaire_response": {"item": [...]}}`. `202 {"receipt_token", "rows"}`.
+Errors: 401 `invalid_service_credentials`, 403 `patient_not_at_unit`, 409
+`card_version_reused`, 422 `validation`, 503 `eps_unavailable`. Details in
+`gateway_technical_guide.md`, "Patient card". The key opens this route only.
+
 ## Error Response Format
 
 All API errors follow a consistent format:
